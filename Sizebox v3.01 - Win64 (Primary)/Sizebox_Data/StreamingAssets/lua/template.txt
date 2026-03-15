@@ -1,0 +1,86 @@
+return {
+    {
+        START = function(data,entity)
+            entity.animation.Set("Excited")
+            return data
+        end,
+        ENDREQUIRE = function(data,entity)
+            return entity.animation.IsCompleted()
+        end,
+        END = function(data,entity)
+            entity.animation.Set("Idle")
+        end,
+        Weight = 80,
+        bypassWait = true
+    },
+    {
+        START = function(data,entity)
+            entity.animation.Set("Roar")
+            return data
+        end,
+        ENDREQUIRE = function(data,entity)
+            return entity.animation.IsCompleted()
+        end,
+        END = function(data,entity)
+            entity.animation.Set("Idle")
+        end,
+        Weight = 80,
+        bypassWait = true
+    },
+    {
+        START = function(data,entity)
+            entity.animation.Set("Talking on Phone")
+            return data
+        end,
+        ENDREQUIRE = function(data,entity)
+            return entity.animation.IsCompleted()
+        end,
+        END = function(data,entity)
+            entity.animation.Set("Idle")
+        end,
+        Weight = 80,
+        bypassWait = true
+    },
+    {
+        START = function(data,entity)
+            entity.animation.Set("Drinking")
+            return data
+        end,
+        ENDREQUIRE = function(data,entity)
+            return entity.animation.IsCompleted()
+        end,
+        END = function(data,entity)
+            entity.animation.Set("Idle")
+        end,
+        Weight = 80,
+        bypassWait = true
+    },
+    {
+        START = function(data,entity)
+            entity.animation.Set("Focus")
+            return data
+        end,
+        ENDREQUIRE = function(data,entity)
+            return entity.animation.IsCompleted()
+        end,
+        END = function(data,entity)
+            entity.animation.Set("Idle")
+        end,
+        Weight = 80,
+        bypassWait = true
+    },
+    {
+        START = function(data,entity)
+            entity.animation.Set("Lifting")
+            return data
+        end,
+        ENDREQUIRE = function(data,entity)
+            return entity.animation.IsCompleted()
+        end,
+        END = function(data,entity)
+            entity.animation.Set("Idle")
+        end,
+        Weight = 80,
+        bypassWait = true
+    }
+}
