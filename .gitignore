@@ -1,0 +1,68 @@
+# ============================================
+# SizeBox Project .gitignore
+# ============================================
+
+# Built game (28GB+ binary assets)
+Sizebox v3.01 - Win64 (Primary)/Sizebox.exe
+Sizebox v3.01 - Win64 (Primary)/UnityCrashHandler64.exe
+Sizebox v3.01 - Win64 (Primary)/UnityPlayer.dll
+Sizebox v3.01 - Win64 (Primary)/MonoBleedingEdge/
+Sizebox v3.01 - Win64 (Primary)/Sizebox_Data/Managed/
+Sizebox v3.01 - Win64 (Primary)/Sizebox_Data/Plugins/
+Sizebox v3.01 - Win64 (Primary)/Sizebox_Data/Resources/
+Sizebox v3.01 - Win64 (Primary)/Sizebox_Data/level*
+Sizebox v3.01 - Win64 (Primary)/Sizebox_Data/sharedassets*
+Sizebox v3.01 - Win64 (Primary)/Sizebox_Data/globalgamemanagers*
+Sizebox v3.01 - Win64 (Primary)/Sizebox_Data/resources.*
+Sizebox v3.01 - Win64 (Primary)/Sizebox_Data/app.info
+Sizebox v3.01 - Win64 (Primary)/Sizebox_Data/boot.config
+Sizebox v3.01 - Win64 (Primary)/Models/
+
+# SDK (1.1GB Unity project with Library cache)
+Sizebox SDK/
+
+# Unity generated
+Library/
+Temp/
+obj/
+*.csproj
+*.sln
+*.suo
+*.user
+*.pidb
+*.booproj
+
+# Build artifacts
+[Bb]uild/
+[Bb]uilds/
+*.apk
+*.unitypackage
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Secrets
+.env
+*.env
+credentials*
+
+# Claude Code / RuFlo config (local tooling)
+.claude/
+.claude-flow/
+.mcp.json
+
+# Lua documentation (generated HTML/LaTeX)
+Sizebox v3.01 - Win64 (Primary)/Sizebox_Data/StreamingAssets/lua/doc/
+
+# Shortcut files
+*.lnk

@@ -1,0 +1,298 @@
+================================================================================
+  SIZEBOX LUA RUNTIME FIX REPORT
+  Fixes Applied Directly to Built Game (No Unity Needed)
+  Generated: 2026-03-14
+================================================================================
+
+OVERVIEW
+  These fixes target Lua scripts in:
+  Sizebox v3.01 - Win64 (Primary)/Sizebox_Data/StreamingAssets/lua/
+
+  All fixes are applied to runtime .lua files that the game loads at startup.
+  No Unity project or recompilation needed -- just file edits.
+
+  TOTAL FIXES: 35 across 18 files
+  CATEGORIES:
+    A. Case-sensitivity API fixes (28 fixes in 16 files)
+    B. Missing RegisterBehavior (1 fix in 1 file)
+    C. Operator precedence bug (1 fix in 1 file)
+    D. Shared state bug (1 fix in 1 file)
+    E. Wrong operator syntax (1 fix in 1 file)
+    F. Null safety after IsDead check (1 fix in 1 file)
+
+  NOTE ON CASE SENSITIVITY:
+  Verified from C# source (LuaEntity.cs) that the API uses PascalCase:
+    FindClosestMicro(), Seek(), Flee(), Wander(), Grow(), Grab(),
+    LookAt(), Stomp(), MoveTo(), IsDead()
+  And lowercase for boolean checks:
+    isHumanoid(), isGiantess(), isPlayer(), isMicro()
+  No MoonSharp case-insensitive configuration was found in the C# source.
+
+================================================================================
+A. CASE-SENSITIVITY FIXES (28 instances in 16 files)
+================================================================================
+
+FIX A-01: .isDead() -> .IsDead()  [11 instances in 5 files]
+---------------------------------------------------------------
+
+  FILE: behaviors/gts_shrink_stomp.lua
+    Line 49:  self.target.isDead()    -> self.target.IsDead()
+    Line 56:  self.target.isDead()    -> self.target.IsDead()
+    Line 75:  self.target.isDead()    -> self.target.IsDead()
+    Line 105: self.target.isDead()    -> self.target.IsDead()
+
+  FILE: behaviors/micro_walk_group.lua
+    Line 40:  micro.isDead()          -> micro.IsDead()
+
+  FILE: behaviors/sticky_grow.lua
+    Line 38:  micro.isDead()          -> micro.IsDead()
+
+  FILE: yandere_1.1.lua
+    Line 81:  self.microToKill.isDead()    -> self.microToKill.IsDead()
+    Line 103: self.target.isDead()         -> self.target.IsDead()
+    Line 134: micros[key].isDead()         -> micros[key].IsDead()
+
+  FILE: behaviors/yandere_1.1 (1).lua
+    Line 81:  self.microToKill.isDead()    -> self.microToKill.IsDead()
+    Line 103: self.target.isDead()         -> self.target.IsDead()
+
+FIX A-02: .findClosestMicro() -> .FindClosestMicro()  [7 instances in 5 files]
+---------------------------------------------------------------
+
+  FILE: behaviors/gts_grab.lua
+    Line 35:  self.agent.findClosestMicro()  -> self.agent.FindClosestMicro()
+
+  FILE: behaviors/gts_eat.lua
+    Line 154: self.agent.findClosestMicro()  -> self.agent.FindClosestMicro()
+
+  FILE: behaviors/gts_shrink_stomp.lua
+    Line 30:  self.agent.findClosestMicro()  -> self.agent.FindClosestMicro()
+    Line 65:  self.agent.findClosestMicro()  -> self.agent.FindClosestMicro()
+
+  FILE: behaviors/walk.lua
+    Line 498: ref.agent.findClosestMicro()   -> ref.agent.FindClosestMicro()
+
+  FILE: behaviors/raygun_example.lua
+    Line 104: self.agent.findClosestMicro()  -> self.agent.FindClosestMicro()
+    Line 116: self.agent.findClosestMicro()  -> self.agent.FindClosestMicro()
+
+FIX A-03: .grow() -> .Grow()  [5 instances in 5 files]
+---------------------------------------------------------------
+
+  FILE: behaviors/grow.lua
+    Line 14:  self.agent.grow(0.1)                       -> self.agent.Grow(0.1)
+
+  FILE: behaviors/grow_stop.lua
+    Line 14:  self.agent.grow(0)                          -> self.agent.Grow(0)
+
+  FILE: behaviors/grow_on_crush.lua
+    Line 26:  self.agent.grow(factor, GROW_DURATION)      -> self.agent.Grow(factor, GROW_DURATION)
+
+  FILE: behaviors/shrink.lua
+    Line 14:  self.agent.grow(-0.1)                       -> self.agent.Grow(-0.1)
+
+  FILE: behaviors/shrink_on_step.lua
+    Line 24:  self.agent.grow(-SHRINK_SPEED, 0.3 / ...)   -> self.agent.Grow(-SHRINK_SPEED, 0.3 / ...)
+
+FIX A-04: .seek() -> .Seek()  [4 instances in 4 files]
+---------------------------------------------------------------
+
+  FILE: behaviors/follow.lua
+    Line 21:  self.agent.seek(...)   -> self.agent.Seek(...)
+
+  FILE: behaviors/micro_seek_gts.lua
+    Line 25:  self.agent.seek(...)   -> self.agent.Seek(...)
+
+  FILE: behaviors/micro_hostile.lua
+    Line 31:  self.agent.seek(...)   -> self.agent.Seek(...)
+
+  FILE: behaviors/micro_get_attention.lua
+    Line 44:  self.agent.seek(...)   -> self.agent.Seek(...)
+
+FIX A-05: .moveTo() -> .MoveTo()  [3 instances in 2 files]
+---------------------------------------------------------------
+
+  FILE: behaviors/raygun_example.lua
+    Line 44:  self.laserCrusher.moveTo(...)  -> self.laserCrusher.MoveTo(...)
+    Line 125: self.agent.moveTo(...)         -> self.agent.MoveTo(...)
+
+  FILE: behaviors/micro_walk_group.lua
+    Line 19:  self.agent.moveTo(...)  -> self.agent.MoveTo(...)
+
+FIX A-06: .wander() -> .Wander()  [2 instances in 2 files]
+---------------------------------------------------------------
+
+  FILE: behaviors/walk.lua
+    Line 382: ref.agent.wander(duration)  -> ref.agent.Wander(duration)
+
+  FILE: behaviors/wander.lua
+    Line 38:  self.agent.wander(timer)    -> self.agent.Wander(timer)
+
+FIX A-07: .grab() -> .Grab()  [2 instances in 2 files]
+---------------------------------------------------------------
+
+  FILE: behaviors/gts_grab.lua
+    Line 74:  self.agent.grab(self.target)  -> self.agent.Grab(self.target)
+
+  FILE: behaviors/gts_eat.lua
+    Line 390: self.agent.grab(self.target)  -> self.agent.Grab(self.target)
+
+FIX A-08: .lookAt() -> .LookAt()  [2 instances in 1 file]
+---------------------------------------------------------------
+
+  FILE: behaviors/raygun_example.lua
+    Line 42:  self.laserCrusher.lookAt(...)  -> self.laserCrusher.LookAt(...)
+    Line 123: self.agent.lookAt(...)         -> self.agent.LookAt(...)
+
+FIX A-09: .flee() -> .Flee()  [1 instance in 1 file]
+---------------------------------------------------------------
+
+  FILE: behaviors/micro_flee.lua
+    Line 26:  self.agent.flee(...)  -> self.agent.Flee(...)
+
+FIX A-10: Mathf.clamp() -> Mathf.Clamp()  [1 instance in 1 file]
+---------------------------------------------------------------
+
+  FILE: behaviors/follow.lua
+    Line 18:  Mathf.clamp(...)  -> Mathf.Clamp(...)
+
+================================================================================
+B. MISSING REGISTERBEHAVIOR (1 file)
+================================================================================
+
+FIX B-01: gts_buttcrush.lua -- behavior never loads
+---------------------------------------------------------------
+
+  FILE: behaviors/gts_buttcrush.lua
+
+  PROBLEM: The file defines methods on "Buttcrush" (Buttcrush:Start(),
+  Buttcrush:Update(), Buttcrush:Exit(), etc.) but never calls
+  RegisterBehavior("Buttcrush") to create the table. All method
+  definitions fail with "attempt to index nil value" because the
+  variable Buttcrush does not exist.
+
+  FIX: Add RegisterBehavior call and data table at the top of the file.
+  Insert before line 1:
+
+    Buttcrush = RegisterBehavior("Buttcrush")
+    Buttcrush.data = {
+        agent = { type = {"giantess"} },
+        target = { type = {"micro"} },
+        menuEntry = "Interaction/Buttcrush",
+        ai = true,
+        tags = "giantess, interaction"
+    }
+
+================================================================================
+C. OPERATOR PRECEDENCE BUG (1 file)
+================================================================================
+
+FIX C-01: behavior_handler.lua -- lastBehavior check bypassed
+---------------------------------------------------------------
+
+  FILE: behavior_handler.lua
+
+  Line 33:
+    CURRENT:  if v.REQUIRED == nil or (v.REQUIRED ~= nil and v.REQUIRED(data)) and v ~= handler_functions.lastBehavior then
+    PROBLEM:  Lua's `and` binds tighter than `or`, so this evaluates as:
+              (v.REQUIRED == nil) OR ((v.REQUIRED ~= nil AND v.REQUIRED(data)) AND (v ~= lastBehavior))
+              When v.REQUIRED is nil, the lastBehavior check is BYPASSED.
+              The same behavior can be selected twice in a row.
+    FIX:      (v.REQUIRED == nil or (v.REQUIRED ~= nil and v.REQUIRED(data))) and v ~= handler_functions.lastBehavior
+
+================================================================================
+D. SHARED STATE BUG (1 file)
+================================================================================
+
+FIX D-01: behavior_handler.lua -- all entities share one state table
+---------------------------------------------------------------
+
+  FILE: behavior_handler.lua
+
+  PROBLEM: Lines 3-9 store ALL state (entity, actionCooldown, behaviors,
+  targetbehaviors, data, lastBehavior) directly on the `handler_functions`
+  module table. Since this table is returned by `require()` and shared,
+  ALL entities using this handler share the same state. Entity B's
+  Start() overwrites Entity A's entity reference, cooldown, etc.
+
+  FIX: Return a factory function that creates independent state per entity.
+  Replace the entire file with a version that creates new instances.
+
+  The fix wraps all state in a local table created per Start() call,
+  rather than storing it on the shared module table.
+
+================================================================================
+E. WRONG OPERATOR SYNTAX (1 file)
+================================================================================
+
+FIX E-01: gts_grab.lua -- JavaScript != instead of Lua ~=
+---------------------------------------------------------------
+
+  FILE: behaviors/gts_grab.lua
+  Line 62:
+    CURRENT:  if self.chasing or self.crouching != crouch then
+    FIX:      if self.chasing or self.crouching ~= crouch then
+    NOTE:     != is JavaScript/C# syntax. Lua uses ~= for "not equal".
+              This line may actually parse as a Lua syntax error on load,
+              which would prevent the entire grab behavior from working.
+
+================================================================================
+F. NULL SAFETY (1 file -- advisory, not necessarily broken)
+================================================================================
+
+FIX F-01: gts_shrink_stomp.lua -- target accessed after nil check
+---------------------------------------------------------------
+
+  FILE: behaviors/gts_shrink_stomp.lua
+  Line 56:
+    CURRENT:  if self.target and self.target.isDead() then self.target = nil self.agent.ai.StopAction() end
+    NOTE:     After fixing isDead -> IsDead, this line is actually safe
+              because it checks `self.target` before calling IsDead().
+              No additional fix needed beyond the case fix.
+
+================================================================================
+SUMMARY OF ALL FIXES
+================================================================================
+
+  Files Modified     | Fix Count | Category
+  -------------------+-----------+------------------
+  gts_shrink_stomp   |    6      | A-01, A-02
+  raygun_example     |    5      | A-02, A-05, A-08
+  yandere_1.1        |    3      | A-01
+  yandere_1.1 (1)    |    2      | A-01
+  gts_grab           |    3      | A-02, A-07, E-01
+  gts_eat            |    2      | A-02, A-07
+  walk               |    2      | A-02, A-06
+  follow             |    2      | A-04, A-10
+  micro_walk_group   |    2      | A-01, A-05
+  grow               |    1      | A-03
+  grow_stop          |    1      | A-03
+  grow_on_crush      |    1      | A-03
+  shrink             |    1      | A-03
+  shrink_on_step     |    1      | A-03
+  wander             |    1      | A-06
+  micro_flee         |    1      | A-09
+  micro_seek_gts     |    1      | A-04
+  micro_hostile      |    1      | A-04
+  micro_get_attention|    1      | A-04
+  sticky_grow        |    1      | A-01
+  gts_buttcrush      |    1      | B-01
+  behavior_handler   |    2      | C-01, D-01
+  -------------------+-----------+------------------
+  TOTAL              |   35      |
+
+  RISK ASSESSMENT:
+  - Category A fixes (case sensitivity): LOW RISK -- straightforward renames
+  - Category B fix (buttcrush): MEDIUM RISK -- new registration code
+  - Category C fix (operator precedence): LOW RISK -- adding parentheses
+  - Category D fix (shared state): HIGH RISK -- structural refactor
+  - Category E fix (wrong operator): LOW RISK -- syntax correction
+
+  RECOMMENDATION:
+  Apply Category A, B, C, and E fixes immediately (33 fixes, all low risk).
+  Category D (behavior_handler shared state) should be tested carefully
+  as it changes the handler's architecture.
+
+================================================================================
+  END OF REPORT
+================================================================================

@@ -1,0 +1,274 @@
+Sizebox Takeover Review
+Generated: 2026-03-10
+Reviewed source: C:\Users\ChesterG\Backup\Cwg\GTS\Sizebox_SourecCode
+
+Summary
+- This is a Unity game codebase organized as a loose source dump, not a complete standalone Unity project.
+- The runtime is heavily component-driven and relies on global singletons, static state, dynamic asset loading, and Lua-scripted behavior.
+- Core game logic is recoverable and readable, but build reproducibility, initialization order, dependency management, and ownership boundaries are weak.
+- The project is maintainable with work, but it should be treated as a stabilization and modernization effort, not a clean handoff.
+
+Structure
+- Major folders:
+- Agents: base entity, humanoid, micro, movement, size, animation.
+- AI: controller, decision makers, behaviors, action queue, pathfinding, senses.
+- GtsScripts: giantess runtime logic, body physics, colliders, IK.
+- Lua: Lua manager plus MoonSharp bindings for entities, movement, senses, IK, etc.
+- PlayerScripts: player controller, resize, player IK.
+- RuntimeLoader: asset bundle loading, audio loading, file IO.
+- UI: menus, editor-style manipulation, pause/settings views, object manager.
+- LevelScripts, Vehicles, Camera, State, Helpers, Test: supporting systems.
+- There are 171 C# files plus a separate bundled Priority Queue library.
+
+Architecture
+- Main runtime entry points:
+- GameController.cs creates and wires global systems at runtime.
+- MainController.cs manages scene switching and persistent lifecycle.
+- ObjectManager.cs is the dynamic spawning hub for player, giantess, micro, and objects.
+- IOManager.cs loads external assets and thumbnails from disk/asset bundles.
+- LuaManager.cs loads and executes Lua scripts from StreamingAssets at startup.
+- Entity hierarchy:
+- EntityBase -> Humanoid -> Micro / Giantess / Player.
+- Behavior model:
+- AIController owns MentalState, DecisionMaker, BehaviorQueue, and ActionManager.
+- Lua behaviors are loaded dynamically and converted into Behavior instances.
+- Giantess look/vision path:
+- AI\SenseController.cs controls visibility.
+- GtsScripts\IK\HeadIK.cs rechecks visibility before maintaining look-at.
+
+Build and Project State
+- The source dump is not a complete Unity project.
+- Missing standard Unity project structure: Assets, ProjectSettings, Packages.
+- Sizebox_SourecCode.sln only includes the Priority Queue project, not the game scripts.
+- Result: this source cannot be rebuilt into the game as-is without reconstructing or recovering the original Unity project.
+- Practical implication:
+- Source is good for code reading and targeted patching.
+- Deployment likely requires rebuilding/replacing Assembly-CSharp.dll inside a compatible Unity project or patching the existing compiled build.
+
+Dependencies
+- Unity APIs:
+- UnityEngine
+- UnityEngine.Networking (UNet, deprecated/removed in modern Unity)
+- Unity scene management, physics, resources, asset bundles, PlayerPrefs.
+- Embedded or expected third-party dependencies:
+- MoonSharp for Lua scripting.
+- RootMotion FinalIK for giantess IK.
+- MMD4Mecanim for imported model support.
+- DynamicBone.
+- SABoneColliderChild-related runtime components.
+- Priority Queue custom library in a separate .csproj.
+- Dependency risk:
+- The code assumes these packages/plugins exist in the host Unity project.
+- This source dump does not include package manifests or an authoritative dependency lock/config.
+
+Strengths
+- The gameplay model is understandable once traced: entities, AI, Lua, loaders, and UI are separated into recognizable folders.
+- Lua bindings are explicit and readable.
+- Entity inheritance is consistent enough to support refactors.
+- Critical giantess visibility behavior is localized in AI\SenseController.cs and Lua\LuaBinding\LuaSenses.cs.
+- Runtime model loading is flexible and supports external content/mod-style workflows.
+
+High Severity Problems
+- 1. Missing buildable project definition for the actual game.
+- Evidence: Sizebox_SourecCode.sln only references Priority Queue.
+- Impact: onboarding, rebuilding, debugging, and release management are blocked or unreliable.
+- Recommendation: reconstruct the Unity project first. This is the top takeover task.
+
+- 2. AI startup has null-reference risk before behavior lists are initialized.
+- Files:
+- AI\GTSDecisionMaker.cs
+- AI\MicroDecisionMaker.cs
+- Problem:
+- Execute() uses aiBehaviors.Count without null checks.
+- InitializeBehaviorList() is called indirectly from LuaManager.LoadBehaviors(), not guaranteed before all AI Update() calls.
+- Impact: startup-order-dependent crashes or inconsistent AI enablement.
+- Recommendation:
+- Add null guards in both decision makers.
+- Move behavior list bootstrap into a deterministic earlier startup phase.
+
+- 3. MicroDecisionMaker can dereference lastDesicion before it is assigned.
+- File: AI\MicroDecisionMaker.cs
+- Problem:
+- Execute() evaluates !lastDesicion.behavior.react before ensuring lastDesicion exists.
+- Impact: null reference when AI is active and not idle before a first decision is recorded.
+- Recommendation:
+- Guard lastDesicion and treat null as "needs decision" or skip reactive check until initialized.
+
+- 4. Runtime directory creation is using the wrong path variable.
+- File: RuntimeLoader\IOManager.cs
+- Problem:
+- GetDirectory() computes newPath from Application.dataPath but checks/creates Directory.Exists(path) and CreateDirectory(path).
+- Impact:
+- folders may be created relative to process working directory instead of intended game root.
+- can behave differently across machines/builds.
+- Recommendation:
+- Check/create newPath, not path.
+
+- 5. Giantess model loading appears to load the wrong vertex file.
+- File: RuntimeLoader\IOManager.cs
+- Problem:
+- vertexBytes is loaded from modelName + ".index.bytes" instead of the vertex asset.
+- Impact:
+- MMD model reconstruction may silently fail or use incorrect data.
+- Recommendation:
+- Verify intended asset naming and correct the vertex file load path.
+
+Medium Severity Problems
+- 6. Path handling is brittle and assumes forward slashes.
+- Files:
+- RuntimeLoader\IOManager.cs
+- other loaders/parsers that use Split('/')
+- Impact:
+- fragile on Windows and unsafe if path normalization changes.
+- Recommendation:
+- use Path.GetFileName, Path.Combine, Path.DirectorySeparatorChar-safe APIs.
+
+- 7. Global singleton and static-state sprawl makes initialization order fragile.
+- Files:
+- GameController.cs
+- MainController.cs
+- State\StateManager.cs
+- UI\Controller\ObjectManager.cs
+- RuntimeLoader\IOManager.cs
+- BehaviorLists\BehaviorLists.cs
+- Impact:
+- hidden coupling, hard-to-reproduce bugs, difficult testing, unclear ownership.
+- Recommendation:
+- centralize bootstrap order and add duplicate-instance protection.
+
+- 8. StateManager resets data in Awake with no duplicate-instance protection.
+- File: State\StateManager.cs
+- Problem:
+- instance getter creates a persistent object lazily, but Awake always recreates myData and gameSettings.
+- Impact:
+- duplicate scene object or accidental reinitialization can wipe state.
+- Recommendation:
+- add singleton guard in Awake and do not reinitialize if instance already exists.
+
+- 9. LuaManager has expensive and failure-prone startup behavior.
+- File: Lua\LuaManager.cs
+- Problems:
+- creates many Script objects eagerly.
+- comments already note high allocation/high CPU usage.
+- ScriptFileExists() always returns true.
+- runtime errors are mostly logged and swallowed.
+- Impact:
+- slow startup, hard-to-diagnose script failures, hidden partial initialization.
+- Recommendation:
+- validate file existence correctly.
+- separate behavior loading from general script loading.
+- surface hard load failures more explicitly.
+
+- 10. Behavior registration/lookup is stringly typed and weakly validated.
+- Files:
+- AI\Behavior.cs
+- AI\BehaviorLists\BehaviorLists.cs
+- Impact:
+- silent mismatches between Lua metadata and runtime entity types.
+- Recommendation:
+- validate required fields at load time and reject malformed behaviors early.
+
+- 11. ObjectManager mutates loaded models as prefabs at runtime.
+- File: UI\Controller\ObjectManager.cs
+- Problem:
+- loaded models are modified in-place before caching and instantiation.
+- Impact:
+- cached state contamination, hard-to-track side effects across spawns.
+- Recommendation:
+- separate prefab preparation from per-instance mutation.
+
+- 12. Project relies on deprecated UNet networking.
+- Files:
+- GameController.cs
+- EntityBase.cs
+- Player.cs
+- ObjectManager.cs
+- many others using UnityEngine.Networking
+- Impact:
+- future Unity upgrades are severely constrained.
+- Recommendation:
+- document current Unity version and treat networking migration as a major future effort.
+
+Low Severity Problems
+- 13. Naming consistency is poor in several critical places.
+- Examples:
+- Sizebox_SourecCode folder typo.
+- maxDistace typo in AI\SenseController.cs.
+- BESpeed / breastExpantionEnabled naming inconsistencies.
+- Impact:
+- slows onboarding and increases bug risk during search/refactor work.
+
+- 14. Logging is noisy and inconsistent.
+- Many classes use Debug.Log/LogError directly in runtime paths.
+- Impact:
+- noisy output in production and harder diagnosis.
+- Recommendation:
+- introduce logging categories or a thin debug wrapper.
+
+- 15. Commented-out dead code remains in core files.
+- Example: large SaveScene block in GameController.cs.
+- Impact:
+- increases maintenance cost and obscures real behavior.
+
+- 16. There is effectively no automated verification in this dump.
+- Test folder exists but does not represent a reliable test suite.
+- Impact:
+- regressions will be caught manually and late.
+
+Concrete Behavioral Findings
+- Giantess visibility / stare logic:
+- AI\SenseController.cs line 27-28 scales visibility by target.Height / entity.Height.
+- This is why very small micros become difficult to detect and keep looked at.
+- GtsScripts\IK\HeadIK.cs line 114 and line 137 rechecks giantess.senses.CheckVisibility(target).
+- Result: head tracking persistence is coupled directly to visibility logic.
+- Lua\LuaBinding\LuaSenses.cs exposes baseVisibilityDistance and fieldOfView but no current review evidence suggests global Lua-side overrides are being used by default.
+
+Code Quality Observations
+- Most classes mix multiple responsibilities: loading, initialization, component wiring, persistence, and gameplay logic are often in one file.
+- Runtime composition is mostly hidden in Awake/Start instead of explicit setup objects.
+- There is little separation between engine concerns and domain concerns.
+- Data structures are mostly mutable and public; encapsulation is weak.
+- Defensive programming is inconsistent: some Debug.Assert usage exists, but many critical flows still assume valid state.
+
+Architecture Recommendations
+- 1. Recover a buildable Unity project before feature work.
+- Without that, every code change is a deployment problem.
+
+- 2. Establish a startup/bootstrap map.
+- Document creation order for GameController, IOManager, ObjectManager, LuaManager, StateManager, BehaviorLists.
+
+- 3. Reduce global state.
+- Replace ad hoc static access with injected references where practical.
+
+- 4. Split loader/runtime/editor concerns.
+- IOManager is doing too much: directory creation, asset bundle loading, shader repair, thumbnail generation, animation registry, save load, audio discovery.
+
+- 5. Add load-time validation.
+- Validate Lua behaviors, model bundles, required resources, and plugin availability at startup with a single summarized report.
+
+- 6. Stabilize entity contracts.
+- Clarify what each subclass must initialize and in what order.
+
+Recommended Fix Order
+- 1. Reconstruct the real Unity project and dependency list.
+- 2. Fix AI null-reference startup hazards.
+- 3. Fix IOManager path creation and giantess vertex-file bug.
+- 4. Add duplicate-instance guards for singleton-like managers.
+- 5. Document external dependencies and required Unity version.
+- 6. Add a minimal smoke-test checklist for player spawn, giantess spawn, Lua behavior load, asset loading, and scene transition.
+- 7. Only after stabilization, start feature changes or refactors.
+
+Takeover Recommendation
+- Treat this as a recovery/stabilization project.
+- Do not start with gameplay tweaks until you have:
+- a buildable environment
+- a dependency inventory
+- a confirmed startup sequence
+- a short manual test checklist
+
+Best Immediate Next Steps
+- Recover or reconstruct the original Unity project.
+- Verify required plugin versions: MoonSharp, FinalIK, MMD4Mecanim, DynamicBone, networking compatibility.
+- Patch the AI null-reference issues first.
+- Audit IOManager pathing and asset bundle assumptions on your target machine.
+- Create a compatibility matrix between this source dump and your v3.01/v3.02 shipped DLLs before attempting DLL replacement.

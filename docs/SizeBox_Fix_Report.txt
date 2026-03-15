@@ -1,0 +1,596 @@
+================================================================================
+  SIZEBOX - COMPREHENSIVE FIX & BUG REPORT
+  Full Codebase Audit by 8 Parallel Analysis Agents
+  Generated: 2026-03-14
+================================================================================
+
+TABLE OF CONTENTS
+  1. Executive Summary
+  2. Severity Statistics
+  3. CRITICAL Fixes (Must Fix -- Crashes & Data Corruption)
+  4. HIGH Severity Fixes (Gameplay-Breaking)
+  5. MEDIUM Severity Issues (Quality & Stability)
+  6. LOW Severity Issues (Polish & Cleanup)
+  7. Architecture-Wide Patterns
+  8. Top 25 Fixes Ranked by Impact
+  9. Systems Reviewed
+
+================================================================================
+1. EXECUTIVE SUMMARY
+================================================================================
+
+  8 specialized code analysis agents reviewed all 171 C# source files and
+  ~35 Lua behavior scripts across every major system in the SizeBox codebase.
+
+  TOTAL ISSUES FOUND: ~310
+  - Critical:  ~35
+  - High:      ~75
+  - Medium:    ~120
+  - Low:       ~80
+
+  OVERALL CODE QUALITY SCORE: 4/10
+
+  The codebase is a functional but fragile Unity 2017.3 game with significant
+  technical debt. The most pervasive problems are:
+
+  1. Missing null checks causing NullReferenceExceptions
+  2. Scale-dependent calculations that break at extreme sizes
+  3. Network synchronization gaps (UNet)
+  4. Memory leaks (meshes, textures, event listeners)
+  5. Frame-rate-dependent physics and movement
+  6. Lua scripting API case-sensitivity mismatches
+  7. Dead/unreachable code paths
+
+  The game likely "works" at normal play because many bugs only manifest at
+  extreme scales, during multiplayer, or in edge-case interactions. A new
+  maintainer should expect frequent NullReferenceExceptions and occasional
+  crashes during extended play sessions.
+
+================================================================================
+2. SEVERITY STATISTICS BY SYSTEM
+================================================================================
+
+  System                 | Files | Critical | High | Medium | Low
+  -----------------------+-------+----------+------+--------+-----
+  AI & Pathfinding       |  33   |    6     |   8  |   14   |  14
+  Player & Agents        |  21   |    2     |  12  |   14   |  12
+  Giantess & IK          |  19   |    7     |   9  |   16   |  11
+  UI & Camera            |  33   |    5     |  12  |   20   |  20
+  Lua Scripting          |  56   |    5     |   7  |   16   |   5
+  Core Managers          |  12   |    5     |  13  |   16   |  14
+  Level & World          |  21   |    2     |   6  |   12   |  11
+  Movement & Steering    |  12   |    3     |   3  |    7   |   5
+
+================================================================================
+3. CRITICAL FIXES (Must Fix -- Crashes & Data Corruption)
+================================================================================
+
+--- CRASH BUGS ---
+
+C-01: GRAVITY NULL REFERENCE -- CRASH EVERY PHYSICS FRAME
+  File: Agents/Gravity.cs:15
+  When GetComponent<Rigidbody>() returns null, AddComponent is called but
+  the result is NOT assigned back to rbody. rbody stays null. FixedUpdate
+  then calls rbody.AddForce() every frame = NullReferenceException.
+  FIX: Change to "rbody = gameObject.AddComponent<Rigidbody>();"
+
+C-02: JIGGLEBONE INVALID QUATERNION -- NaN PROPAGATION
+  File: JiggleBone.cs:39
+  "transform.rotation = new Quaternion()" creates quaternion (0,0,0,0)
+  which is INVALID. Identity is (0,0,0,1). This causes NaN propagation
+  through all child bone transforms, corrupting the entire skeleton.
+  FIX: Use "transform.rotation = Quaternion.identity;"
+
+C-03: GIANTESS IK FOOT COLLIDER NULL CRASH
+  File: GtsScripts/IK/GiantessIK.cs:194-199
+  leftFootCollider is searched by name prefix "Coll". If no matching
+  child exists, it stays null. Lines 194-199 access .transform and
+  .sharedMesh unconditionally = NullReferenceException on spawn.
+  FIX: Add null check before accessing leftFootCollider.
+
+C-04: MICRO COLLISION NULL DEREF IN PARENT TRAVERSAL
+  File: Agents/Micro.cs:61-63
+  While loop sets t = null to break, then line 63 does t = t.parent
+  which dereferences null = NullReferenceException.
+  FIX: Use "break;" instead of "t = null;"
+
+C-05: A* PATHFINDING INFINITE LOOP
+  File: AI/Pathfinding/AStar.cs:126-129
+  "while(current.node != start)" walks back through previous pointers.
+  If closestNodeToGoal's chain doesn't include start, this is an
+  infinite loop or null deref when current.previous is null.
+  FIX: Add guard: "while(current.previous != null && current.node != start)"
+
+C-06: LUA MATHF.PERLINNOISE INFINITE RECURSION
+  File: Lua/LuaBinding/LuaMathf.cs:316
+  "return PerlinNoise(x,y)" calls itself instead of
+  UnityEngine.Mathf.PerlinNoise(x,y) = StackOverflowException.
+  FIX: Change to "return UnityEngine.Mathf.PerlinNoise(x, y);"
+
+C-07: BEHAVIOR QUEUE CRASHES ON LUA CREATE FAILURE
+  File: AI/Behavior.cs:58 + AI/BehaviorQueue.cs:137
+  Behavior.CreateInstance returns null on Lua exception. BehaviorQueue
+  immediately calls instance.Start() on null = NullReferenceException.
+  FIX: Null-check CreateInstance return before calling Start.
+
+C-08: AUDIO LOADER RETURNS UNLOADED CLIP
+  File: RuntimeLoader/AudioLoader.cs:46-48
+  WWW request created but audioClip accessed immediately without
+  waiting for download. Returns empty/corrupted clip every time.
+  FIX: Use coroutine with yield or UnityWebRequestMultimedia.
+
+C-09: AUDIO LOADER NULL REFERENCE ON MISSING CLIP
+  File: RuntimeLoader/AudioLoader.cs:12-20
+  TryGetValue fails, logs error, then accesses clip.name on null clip.
+  FIX: Return null after logging error (add early return).
+
+C-10: IOMANAGER COPY-PASTE BUG LOADS WRONG ASSET
+  File: RuntimeLoader/IOManager.cs:370
+  "vertexBytes = bundle.LoadAsset(modelName + ".index.bytes")" should
+  be ".vertex.bytes". Loads index data as vertex data = corrupted models.
+  FIX: Change to ".vertex.bytes".
+
+--- DATA CORRUPTION ---
+
+C-11: PREFERENCES NEVER ACTUALLY SAVE
+  File: PreferencesCentral.cs:71 and 104
+  FloatStored.value and BoolStored.value setters use the property name
+  "value" which shadows the C# setter keyword. The assignment "val = value"
+  either no-ops or recurses infinitely. User preferences are never persisted.
+  FIX: Rename the property to avoid shadowing the setter keyword.
+
+C-12: CREATE MESH MEMORY LEAK -- UNBOUNDED GPU MEMORY
+  File: GtsScripts/CreateMesh.cs:29-36
+  UpdateCollider creates new Mesh() every call, assigns to sharedMesh.
+  Old mesh is set to null but never Destroy()ed. Unity Meshes are native
+  objects requiring explicit destruction. GPU memory grows without bound.
+  FIX: Call Destroy() on old sharedMesh before creating new one.
+
+C-13: IOMANAGER RENDER TEXTURE LEAK
+  File: RuntimeLoader/IOManager.cs:744-775
+  RenderTexture.GetTemporary() called but ReleaseTemporary() never called.
+  Texture2D created but never destroyed. Called per-material during loading.
+  FIX: Add RenderTexture.ReleaseTemporary(rt) and Destroy(img2).
+
+C-14: SELECTDECISION CAN BE NULL (FLOATING POINT EDGE CASE)
+  File: AI/GTSDecisionMaker.cs:44-58 + AI/MicroDecisionMaker.cs:45-57
+  Weighted random selection: if choiceValue == totalScore exactly (float
+  edge case), accumuledScore never exceeds it, selectDecision stays null.
+  Line 57 crashes on selectDecision.behavior.
+  FIX: Add fallback: if(selectDecision == null) selectDecision = decisions[decisions.Count - 1];
+
+C-15: MICRODODECISIONMAKER CRASH ON FIRST EXECUTE
+  File: AI/MicroDecisionMaker.cs:26
+  Field "lastDesicion" never initialized. First Execute() when not idle
+  accesses lastDesicion.behavior.react = NullReferenceException.
+  FIX: Initialize lastDesicion or add null check.
+
+================================================================================
+4. HIGH SEVERITY FIXES (Gameplay-Breaking)
+================================================================================
+
+--- MOVEMENT & PHYSICS ---
+
+H-01: CHARACTERS WALK THROUGH WALLS
+  File: Agents/MovementCharacter.cs:111
+  "rbody.position = displacement" teleports rigidbody, completely
+  bypassing Unity collision detection. All AI characters can walk
+  through walls, other characters, and all colliders.
+  FIX: Use rbody.MovePosition(displacement).
+
+H-02: GRAVITY DOESN'T SCALE WITH MASS
+  File: Agents/Gravity.cs:24
+  AddForce uses default ForceMode.Force which divides by mass. Small
+  characters plummet instantly, large characters float languidly.
+  FIX: Use ForceMode.Acceleration for consistent gravity feel.
+
+H-03: STEERING COMPUTED IN WRONG UPDATE LOOP
+  File: Agents/MovementCharacter.cs:89-199
+  Steering computed in LateUpdate, movement applied in FixedUpdate.
+  Causes jittering at low framerates and framerate-dependent speed.
+  FIX: Move steering computation to FixedUpdate.
+
+H-04: JUMP KILLS HORIZONTAL MOMENTUM
+  File: PlayerScripts/Player.cs:428
+  "rbody.velocity = new Vector3(0, jumpHeight * Scale, 0)" zeroes X/Z.
+  Player stops moving forward mid-air on every jump.
+  FIX: Preserve horizontal velocity during jump.
+
+H-05: OBSTACLE DETECTOR IS A NO-OP STUB
+  File: Agents/ObstacleDetector.cs:5-18
+  CheckObstacle() always returns false. Wall avoidance does nothing.
+  All AI characters have zero obstacle avoidance capability.
+  FIX: Implement raycast-based detection or verify subclass exists.
+
+H-06: PLAYER FPS CAMERA PERMANENTLY DISABLED
+  File: PlayerScripts/Player.cs:472
+  "if(climbing || true) return;" -- always returns. First-person camera
+  rotation is completely broken. All code below is unreachable.
+  FIX: Remove "|| true".
+
+--- IK & ANIMATION ---
+
+H-07: HAND GRAB NEVER RELEASES TARGET
+  File: GtsScripts/IK/HandIK.cs:105-121
+  Target is parented to hand bone during grab. Return state never
+  unparents (SetParent(null)) or unlocks the target. Grabbed entities
+  remain attached to the giantess hand permanently.
+  FIX: Add target.transform.SetParent(null) and target.Unlock() in Return.
+
+H-08: STOMP ACTION OPERATOR PRECEDENCE BUG
+  File: AI/Actions/Interaction/StompAction.cs:18
+  "hasStarted && agent.ik.crushEnded || target == null || target.isDead"
+  evaluates as (hasStarted && crushEnded) || targetNull || targetDead.
+  Reports completed before action starts if target is null/dead.
+  FIX: Add parentheses for intended grouping.
+
+H-09: BE ACTION INTERRUPT STARTS INSTEAD OF STOPS
+  File: AI/Actions/Resizing/BEAction.cs:39
+  Interrupt() sets BESpeed = speed (original speed) instead of 0.
+  Interrupting breast expansion RESTARTS it instead of stopping.
+  FIX: Change to giantess.BESpeed = 0f;
+
+H-10: STATIC COLLIDERS ENABLE ALWAYS DESTROYS MESHES
+  File: GtsScripts/Giantess.cs:322-329
+  StaticCollidersEnable(bool option) ignores the parameter. Always
+  calls DestroyMesh() regardless of true/false.
+  FIX: Only DestroyMesh when option is false.
+
+H-11: HUMANOID SETS GIANTESS ANIMATOR ON ALL HUMANOIDS
+  File: Agents/Humanoid.cs:53
+  SetPoseMode(false) applies giantess animator to ALL humanoids
+  including micros and players. Wrong animation controller.
+  FIX: Store and restore original animator controller.
+
+--- NETWORKING ---
+
+H-12: ENTITY SCALE SYNC BROKEN
+  File: Agents/EntityBase.cs:158-165
+  _ChangeScale called locally for all clients BEFORE network command.
+  Clients without authority change scale before server validation.
+  FIX: Only call _ChangeScale locally if hasAuthority.
+
+H-13: MICRO PARENTING NOT NETWORKED
+  File: Agents/Micro.cs:59,76,106
+  SetParent calls in collision handlers are local-only. Parent
+  relationships diverge between clients = position desync.
+
+H-14: NPC CRUSH NOT NETWORKED
+  File: NPC/MicroNPC.cs:51-64
+  Crush handler destroys components locally without authority check.
+  State diverges between clients. Destroy(gameObject,120) is local only.
+
+--- UI ---
+
+H-15: EDIT CURSOR NEVER SHOWS
+  File: UI/View/EditPlacement.cs:240
+  ShowCursor(bool show) always calls cursor.SetActive(false).
+  The placement cursor is never visible in edit mode.
+  FIX: Change to cursor.SetActive(show).
+
+H-16: SAVE/LOAD IS BROKEN
+  File: UI/View/EditPlacement.cs:284-293
+  LoadGiantess sets go=null, spawns async, then if(go==null) return.
+  Always returns. All subsequent load logic is unreachable dead code.
+
+H-17: SAVE BUTTON DOES NOTHING
+  File: UI/View/Pause/PauseView.cs:93-96
+  OnSaveClick is empty. Comment says "needs reimplementation."
+
+--- LUA ---
+
+H-18: MULTIPLE LUA SCRIPTS BROKEN BY CASE SENSITIVITY
+  Files: follow.lua, gts_eat.lua, gts_grab.lua, gts_shrink_stomp.lua,
+         walk.lua, wander.lua, micro_flee.lua, micro_seek_gts.lua, grow.lua
+  C# API uses PascalCase (FindClosestMicro, Seek, Flee, Wander, Grow).
+  Lua scripts use camelCase (findClosestMicro, seek, flee, wander, grow).
+  Unless MoonSharp is configured case-insensitive, ALL of these are broken.
+
+H-19: BUTTCRUSH BEHAVIOR NEVER LOADS
+  File: StreamingAssets/lua/behaviors/gts_buttcrush.lua
+  Never calls RegisterBehavior(). Variable "Buttcrush" is nil.
+  All method definitions fail with "attempt to index nil value."
+
+H-20: LUA BEHAVIOR HANDLER SHARES STATE BETWEEN ENTITIES
+  File: StreamingAssets/lua/behavior_handler.lua:3-9
+  All state stored on shared table, not per-instance. Multiple entities
+  using this handler overwrite each other's data.
+
+H-21: LUA SCRIPTS CAN EXECUTE SYSTEM COMMANDS (SECURITY)
+  File: Lua/LuaManager.cs:246
+  MoonSharp created without sandbox. os.execute(), io.open(), loadfile()
+  are all accessible. Community Lua scripts could run arbitrary commands.
+  FIX: Use CoreModules.Preset_SoftSandbox.
+
+--- CORE ---
+
+H-22: AUTOCONFIGURE NPC LOADS RESOURCES EVERY FRAME
+  File: NPC/AutoConfigureNPC.cs:36-43
+  Resources.Load("TinyController") called EVERY FRAME in Update().
+  Causes severe stuttering. Also has [ExecuteInEditMode].
+  FIX: Move to Start/Awake and cache result.
+
+H-23: EVENTMANAGER NEVER REMOVES LISTENERS
+  File: EventManager.cs:12-43
+  No UnregisterListener method. Destroyed objects stay in list forever.
+  Growing list, NRE risks, prevents garbage collection.
+  FIX: Add UnregisterListener + cleanup on destroyed objects.
+
+H-24: SUN CONTROLLER CAPTURES ALL INPUT GLOBALLY
+  File: SunController.cs:36-52
+  Reads mouse/keyboard (A, Z keys) unconditionally. Conflicts with
+  player movement controls during normal gameplay.
+  FIX: Gate behind editor mode toggle.
+
+H-25: PATHFINDING USES SHARED STATIC STATE
+  File: AI/Pathfinding/Node.cs:7, AI/Pathfinding/WorldNodes.cs:4
+  PathNode.connections and WorldNodes.nodeArray are static. Two agents
+  pathfinding in the same frame corrupt each other's data.
+  FIX: Make instance-based or use per-call buffers.
+
+================================================================================
+5. MEDIUM SEVERITY ISSUES (Quality & Stability)
+================================================================================
+
+--- Scale-Dependent Bugs ---
+M-01: SenseController detection range collapses at extreme size ratios
+      (AI/SenseController.cs:27-28) -- size ratio multiplier makes tiny
+      players invisible to giantesses
+M-02: HeadIK won't look at tiny players (GtsScripts/IK/HeadIK.cs:114)
+M-03: CollisionDetector hardcoded dimensions ignore scale
+      (GtsScripts/CollisionDetector.cs:21-24)
+M-04: JiggleBone physics not scale-aware (JiggleBone.cs:13,19,33)
+M-05: Arrive targetRadius too small at micro scales
+      (AI/Steering.cs:263-264)
+M-06: MaxSpeed scales linearly = uncontrollable at 1000x
+      (Agents/MovementCharacter.cs:26-29)
+M-07: Jump threshold uses absolute velocity, not scaled
+      (PlayerScripts/Player.cs:416)
+M-08: ResizeCharacter uses static min/max affecting ALL instances
+      (PlayerScripts/ResizeCharacter.cs:50-51)
+M-09: AnimationManager speed goes negative at extreme heights
+      (Agents/AnimationManager.cs:155-156)
+M-10: CenterOrigin threshold not scaled for large players
+      (Camera/CenterOrigin.cs:30)
+
+--- State Machine Issues ---
+M-11: WaypointArrive permanently disables pathfinding after 10 retries
+      (AI/Steering.cs:246)
+M-12: WaypointArrive width grows exponentially on retries
+      (AI/Steering.cs:239)
+M-13: Foot crush state has no timeout/safety exit
+      (GtsScripts/IK/GiantessIK.cs:448-477)
+M-14: Player crushed state only recoverable by specific inputs
+      (PlayerScripts/Player.cs:606-618)
+M-15: Micro never unparents from gts body on collision exit
+      (Agents/Micro.cs:114-133)
+
+--- Performance ---
+M-16: IOManager blocking I/O on main thread during Awake
+      (RuntimeLoader/IOManager.cs:91-95,128-142)
+M-17: DynamicMeshCreator O(bones*vertices) arrays in Start
+      (GtsScripts/DynamicMeshCreator.cs:28,85)
+M-18: CityBuilder synchronous generation = frame spike
+      (ProceduralCityGenerator/CityBuilder.cs:155-175)
+M-19: FPSDisplay creates new GUIStyle every OnGUI call
+      (UI/FPSDisplay.cs:17)
+M-20: MicroManager dictionary grows with null entries
+      (Agents/MicroManager.cs:34-41)
+
+--- Memory Leaks ---
+M-21: ScreenshotTaker never releases RenderTexture
+      (ScreenshotTaker.cs:17-18)
+M-22: SkinnedCollisionHelper.Release never called
+      (Test/SkinnedCollisionHelper.cs:118-122)
+M-23: PoseIK bend goal GameObjects never cleaned up
+      (GtsScripts/IK/PoseIK.cs:64-78)
+M-24: UI views never unsubscribe from OnSelected events
+      (AnimationView.cs:55, MorphsView.cs:48, PoseView.cs:60)
+M-25: SoundManager audio source GameObject orphaned on destroy
+      (SoundManager.cs:106-110)
+
+--- Networking ---
+M-26: Player fly/climb state not synced (PlayerScripts/Player.cs:56,59)
+M-27: EntityBase._ChangeScale unparent/reparent not synced
+      (Agents/EntityBase.cs:185-189)
+M-28: ChangeOffset only works on server (Agents/EntityBase.cs:226-228)
+
+--- VR ---
+M-29: VRCamera uses deprecated UnityEngine.VR API
+      (Camera/VRCamera.cs:4,29-57)
+M-30: VR device detection unreliable (Camera/VRCamera.cs:27-60)
+M-31: VR mode toggles not mutually exclusive
+      (UI/View/Pause/VideoSettingsView.cs:46-64)
+
+--- Lua ---
+M-32: Lua Entity wrappers hold strong refs to destroyed objects
+      (Lua/LuaBinding/LuaEntity.cs:13)
+M-33: Every Lua script runs Update() every frame, no throttling
+      (Lua/LuaManager.cs:169-194)
+M-34: New Script() = 2.2MB per instance, ~110MB total
+      (Lua/LuaManager.cs:243-244)
+M-35: Vector3/Entity wrapper allocations every property access
+      (Lua/LuaBinding/LuaVector3.cs, LuaBones.cs:146-150)
+M-36: DistanceTo returns squared-distance/height, not distance
+      (Lua/LuaBinding/LuaEntity.cs:170-176)
+M-37: ScriptFileExists always returns true
+      (Lua/LuaManager.cs:289-292)
+M-38: No error handling on coroutine Resume
+      (Lua/LuaManager.cs:189-191)
+M-39: GetGlobalSpeed modifies speed instead of returning it
+      (Lua/LuaBinding/LuaAnimation.cs:150-153)
+M-40: No SyntaxErrorException handling during script loading
+      (Lua/LuaManager.cs:89-113)
+
+--- Other ---
+M-41: CenterOrigin static Vector3 aux is not thread-safe
+      (Camera/CenterOrigin.cs:12,63-82)
+M-42: GTSMovement float equality causes per-frame rescale
+      (GtsScripts/GTSMovement.cs:60)
+M-43: IOManager path separator wrong on Windows
+      (RuntimeLoader/IOManager.cs:234-235)
+M-44: IOManager shader array bounds check off-by-one
+      (RuntimeLoader/IOManager.cs:508)
+M-45: GameController speed methods are inverted
+      (GameController.cs:149-159)
+M-46: Escape key conflict between SaveWindow and MainInput
+M-47: CityBuilding static shared state corrupts multi-city
+      (ProceduralCityGenerator/CityBuilding.cs:7-15)
+M-48: TreeSpawner recursive PoolPatch can stack overflow
+      (LevelScripts/TreeSpawner.cs:132-134)
+M-49: CityBuilder diameter off-by-one leaves null edge tiles
+      (ProceduralCityGenerator/CityBuilder.cs:179-193)
+M-50: SaveWindow does not sanitize filename (traversal risk)
+      (UI/SaveWindow.cs:28-29)
+
+================================================================================
+6. LOW SEVERITY ISSUES (Polish & Cleanup)
+================================================================================
+
+  - ~80 issues including: dead code (NewBehaviourScript.cs, commented-out
+    SaveScene), spelling errors (maxDistace, lastDesicion, InmediateCommand,
+    contatcPoint, UnparentWhileFlyng), empty Update methods, unnecessary
+    MonoBehaviour inheritance (LayerManager), duplicate code patterns,
+    missing PlayerPrefs.Save(), unused RpcChangeScale, Debug.Log in
+    production, pagination off-by-one, GetCameraRight returning forward, etc.
+
+================================================================================
+7. ARCHITECTURE-WIDE PATTERNS
+================================================================================
+
+  PATTERN 1: MISSING NULL CHECKS
+  Nearly every GetComponent, Camera.main, singleton.Instance, and bone
+  transform lookup lacks null protection. This is the #1 source of crashes.
+  SCOPE: ~50+ instances across all systems.
+
+  PATTERN 2: SCALE-DEPENDENT HARDCODING
+  Magic numbers (850, 200, 1200, 400, 2000, etc.) are used throughout the
+  IK, collision, and physics systems. None scale with entity size. The game
+  was tuned for a specific scale range and breaks outside it.
+  SCOPE: ~30+ instances in GtsScripts/, Agents/, Camera/.
+
+  PATTERN 3: SINGLETON FRAGILITY
+  GameController, MainController, ObjectManager, IOManager, StateManager,
+  NPCSpawner all use fragile singleton patterns with no duplicate protection,
+  inconsistent initialization timing, and missing DontDestroyOnLoad.
+  SCOPE: 6+ singletons.
+
+  PATTERN 4: EVENT LISTENER LEAKS
+  EventManager has no unregister method. Every registered listener stays
+  forever. SoundManager, PlayerCamera, and others register but never
+  unregister, causing null callbacks after scene transitions.
+  SCOPE: All event listeners.
+
+  PATTERN 5: FRAME-RATE DEPENDENT BEHAVIOR
+  Steering in LateUpdate, movement in FixedUpdate. Lerp with deltaTime
+  (asymptotic, never converges). JiggleBone physics with no time step.
+  SCOPE: MovementCharacter, JiggleBone, HeadIK, GiantessIK.
+
+  PATTERN 6: STATIC SHARED STATE
+  PathNode.connections, WorldNodes.nodeArray, CityBuilding statics,
+  ResizeCharacter.minSize/maxSize, CenterOrigin.aux -- all use static
+  fields that are shared across instances and can cause data corruption.
+  SCOPE: 6+ classes.
+
+================================================================================
+8. TOP 25 FIXES RANKED BY IMPACT
+================================================================================
+
+  Priority | ID   | Description                                    | Effort
+  ---------+------+------------------------------------------------+-------
+   1       | C-01 | Gravity null reference crash                    | 1 line
+   2       | H-01 | Characters walk through walls (MovePosition)   | 1 line
+   3       | C-02 | JiggleBone invalid quaternion                   | 1 line
+   4       | C-06 | Lua PerlinNoise infinite recursion              | 1 line
+   5       | H-06 | FPS camera permanently disabled (|| true)       | 1 line
+   6       | H-15 | Edit cursor never shows                        | 1 line
+   7       | C-10 | IOManager loads wrong vertex asset              | 1 line
+   8       | H-04 | Jump kills horizontal momentum                  | 1 line
+   9       | C-04 | Micro collision null deref (use break)           | 1 line
+  10       | H-09 | BE interrupt starts instead of stops            | 1 line
+  11       | H-22 | AutoConfigureNPC Resources.Load every frame     | 5 lines
+  12       | C-14 | AI decision null crash (float edge case)        | 2 lines
+  13       | C-05 | A* pathfinding infinite loop                    | 1 line
+  14       | H-02 | Gravity ForceMode.Acceleration                  | 1 line
+  15       | C-03 | GiantessIK foot collider null crash             | 3 lines
+  16       | C-12 | CreateMesh memory leak                          | 2 lines
+  17       | C-11 | Preferences never save                         | rename
+  18       | H-23 | EventManager add UnregisterListener             | 15 lines
+  19       | H-10 | StaticCollidersEnable ignores parameter         | 3 lines
+  20       | H-08 | StompAction operator precedence                 | 1 line
+  21       | C-08 | AudioLoader returns unloaded clip               | 10 lines
+  22       | H-07 | HandIK never releases grabbed target            | 3 lines
+  23       | H-11 | Humanoid applies wrong animator                 | 5 lines
+  24       | H-25 | Pathfinding shared static state                 | 20 lines
+  25       | H-21 | Lua sandbox security                           | 1 line
+
+  NOTE: 15 of the top 25 fixes are 1-3 line changes. The total effort to
+  fix all 25 highest-impact issues is approximately 80 lines of code.
+
+================================================================================
+9. SYSTEMS REVIEWED
+================================================================================
+
+  Agent 1 - AI & Pathfinding (33 files)
+    AI/AIController, ActionManager, Behavior, BehaviorQueue, Action,
+    ActionSequence, IDecisionMaker, MentalState, Steering, SenseController,
+    SharedKnowledge, GTSDecisionMaker, MicroDecisionMaker, BehaviorLists,
+    14 Action types, AStar, Pathfinder, Node, WorldNodes
+
+  Agent 2 - Player & Agents (21 files)
+    EntityBase, Humanoid, Micro, Player, ClientPlayer, ServerPlayerControl,
+    PlayerIK, ResizeCharacter, AnimationManager, MicroManager, SizeChanger,
+    MovementCharacter, WalkController, Gravity, ObstacleDetector, Destructor,
+    NPCSpawner, MicroNPC, AutoConfigureNPC, TankControl, MicroObstacleDetector
+
+  Agent 3 - Giantess & IK (19 files)
+    Giantess, GiantessControl, GTSMovement, BodyPhysics, GiantessBone,
+    GiantessObstacleDetector, CollisionDetector, CreateMesh, DynamicMeshCreator,
+    JapaneseData, Voice, FootEffect, JiggleBone,
+    GiantessIK, HandIK, HeadIK, PoseIK, IKBone, PoseHandle
+
+  Agent 4 - UI & Camera (33 files)
+    MenuController, UICharSelect, UIStageSelect, LoadSceneUI, SaveWindow,
+    FPSDisplay, InterfaceControl, ObjectManager, AnimationData,
+    MainView, MainInput, AnimationView, CatalogView, CommandView,
+    EditView, EditPlacement, HandleControl, MorphsView, PoseView,
+    TransformView, PauseView, SettingsView, GameSettingsView,
+    AudioSettingsView, VideoSettingsView,
+    MainCameraController, PlayerCamera, VRCamera, SimCam, CameraShake,
+    CameraEffectsSettings, CenterOrigin, CameraReference
+
+  Agent 5 - Lua Scripting (56 files)
+    LuaManager, UnityProxies, 18 LuaBinding classes,
+    ~35 Lua behavior scripts (behaviors/, personalities, examples)
+
+  Agent 6 - Core Managers (12 files)
+    GameController, MainController, EventManager, PreferencesCentral,
+    SoundManager, CustomAudioSource, LayerManager, StringHolder,
+    StateManager, IOManager, AudioLoader, EntityBase
+
+  Agent 7 - Level & World (21 files)
+    MapSettings, SpaceScript, TerrainScript, TerrainTree, TreeSpawner,
+    WaterHelper, ThirdPersonOrbitCam, EventIndicator, IDestructible,
+    CityBuilder, CityBuilding, VehicleEnterExit, StandardCarControl,
+    VehicleInputController, SunController, ScreenshotTaker, ThumbnailCreator,
+    DebugHelper, RuntimeDebugDraw, MorphChanger, SkinnedCollisionHelper
+
+  Agent 8 - Movement & Steering (12 files)
+    Steering (Seek, Flee, Arrive, Align, Face, Wander, Pursue, AvoidWall,
+    WaypointArrive), MovementCharacter, WalkController, Gravity,
+    ObstacleDetector, Priority Queue library (9 files)
+
+================================================================================
+  END OF REPORT
+================================================================================
+
+  Total files analyzed: 171 C# + ~35 Lua = ~206 files
+  Total issues found: ~310
+  Estimated fix effort for top 25: ~80 lines of code
+  Estimated full remediation: 300-500 hours
+  Report compiled from 8 parallel analysis agents
+
+  Next recommended action:
+  Fix the top 10 items (all 1-line changes) to eliminate the most
+  common crashes, then work through the High severity list before
+  attempting any new feature development.

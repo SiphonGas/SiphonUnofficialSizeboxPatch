@@ -1,0 +1,726 @@
+================================================================================
+  SIZEBOX PROJECT - INVESTIGATION & DISCOVERY REPORT
+  For New Maintainer Handoff
+  Generated: 2026-03-14
+================================================================================
+
+TABLE OF CONTENTS
+  1.  Executive Summary
+  2.  What Each Folder Appears To Be
+  3.  Source-of-Truth Assessment
+  4.  Engine and Toolchain Assessment
+  5.  Do I Need Unity?
+  6.  Recommended Unity Version and Why
+  7.  Architecture Overview
+  8.  Major Systems Identified
+  9.  Risks, Missing Pieces, and Likely Breakages
+  10. Fastest Path to Resume Development
+  11. Recommended Next 7 Steps
+  12. Open Questions
+  13. Confidence Level
+  14. Decision: Can This Game Realistically Be Continued?
+
+================================================================================
+1. EXECUTIVE SUMMARY
+================================================================================
+
+SizeBox is a mature Unity-based sandbox game with approximately 171 C# source
+files (~30,000+ lines of code), 71 Lua behavior scripts, VR support (Oculus +
+SteamVR), deprecated UNet multiplayer networking, Lua modding via MoonSharp,
+advanced IK animation via RootMotion FinalIK, MMD character model support,
+procedural city generation, and a full AI behavior system.
+
+The handoff contains THREE folders:
+
+  1. A compiled Win64 build (playable, version 3.01)
+  2. A content creation SDK (Unity 2017.3.0f3 project for exporting models)
+  3. A scripts-only source code dump (C# files + .meta files, NOT a full project)
+
+CRITICAL FINDING: The source code folder is NOT a complete Unity project. It
+contains only the C# scripts and their .meta files. The full Unity project --
+including scenes (.unity), prefabs (.prefab), shaders (.shader), materials,
+textures, audio, ProjectSettings, and all asset references -- is MISSING.
+
+This means you CANNOT simply open the source code folder in Unity and hit Play.
+Significant reconstruction work is required.
+
+However, the combination of the built game (which contains compiled assets and
+Lua scripts), the SDK (which is a full Unity project and establishes the Unity
+version), and the source code (which has the complete C# codebase) provides
+enough material to reconstruct and continue development -- with effort.
+
+================================================================================
+2. WHAT EACH FOLDER APPEARS TO BE
+================================================================================
+
+------------------------------------------------------------------------------
+FOLDER 1: "Sizebox v3.01 - Win64 (Primary)"
+------------------------------------------------------------------------------
+
+  TYPE: Compiled Unity standalone build (Win64)
+  STATUS: Complete, playable
+
+  Evidence:
+    - Sizebox.exe (main executable)
+    - UnityPlayer.dll (Unity runtime)
+    - UnityCrashHandler64.exe (crash handler)
+    - MonoBleedingEdge/ (full Mono runtime -- confirms Mono backend, NOT IL2CPP)
+    - Sizebox_Data/Managed/ (94 DLLs including Assembly-CSharp.dll)
+    - Sizebox_Data/StreamingAssets/lua/ (71 Lua behavior scripts)
+    - Sizebox_Data/Plugins/x86_64/ (VR plugins: OVRPlugin.dll, openvr_api.dll,
+      AudioPluginOculusSpatializer.dll)
+    - Sizebox_Data/boot.config (vr-enabled=1, gc-max-time-slice=3)
+    - Sizebox_Data/app.info (developer: "Aiiko", product: "Sizebox")
+    - 9 level files (level0 through level8)
+    - 9 shared asset bundles (sharedassets0-8.assets)
+    - Models/ folder with Giantess, Objects, Scenes subfolders
+    - Convert blend to sizebox.docx (model conversion documentation)
+
+  What this tells us:
+    - The game was built and released at version 3.01
+    - It uses Mono scripting backend (decompilable as a fallback)
+    - VR was a first-class feature (Oculus + SteamVR)
+    - The Lua modding system is active and ships with 71 behavior scripts
+    - 9 scenes/levels exist in the built game
+    - Models are loaded at runtime from the Models/ folder (not baked in)
+
+------------------------------------------------------------------------------
+FOLDER 2: "Sizebox SDK"
+------------------------------------------------------------------------------
+
+  TYPE: Content creation SDK -- a full Unity 2017.3.0f3 project for exporting
+        custom models and scenes into SizeBox-compatible format
+  STATUS: Complete Unity project (Assets/, ProjectSettings/, Library/ all present)
+
+  Evidence:
+    - SizeboxSdk/ProjectSettings/ProjectVersion.txt: "m_EditorVersion: 2017.3.0f3"
+    - SizeboxSdk/Assets/SizeboxSDK/Editor/ (7 editor scripts for model/scene export)
+    - SizeboxSdk/Assets/SizeboxSDK/Scripts/ (2 runtime scripts: PlayerSpawnPoint,
+      StringHolder)
+    - SizeboxSdk/Assets/Import/ (GTS/, Micro/, Object/ -- import staging folders)
+    - SizeboxSdk/Assets/Export/ (output folder for asset bundles)
+    - SizeboxSdk/Assets/MMD4Mecanim/ (full MMD animation pipeline)
+    - SizeboxSdk/Assets/BulletXNA/ (physics engine)
+    - SizeboxSdk/Assets/Plugins/ (x86, x86_64 native DLLs)
+    - SizeboxSdk/Assets/Shaders/ (Cubed's Unity Shaders)
+    - SizeboxSdk/Assets/PostProcessing/ (post-processing stack)
+    - SizeboxSdk/Library/ (644 .meta files -- cached/compiled)
+    - 10 .unity scene files (demo/preview scenes)
+    - Companion tools: Gts Retriever/, Model Editor/
+    - Documentation: Sizebox SDK User Guide.pdf, model editor guide, retriever guide
+
+  What this tells us:
+    - CONFIRMS Unity version: 2017.3.0f3
+    - This SDK was distributed to modders/content creators
+    - It exports models in three categories: .gts, .micro, .object
+    - The SDK shares some dependencies with the main game (MMD4Mecanim,
+      BulletXNA, custom shaders)
+    - This is NOT the main game project -- it's a separate tooling project
+    - The Library/ folder suggests this project was last opened in Unity 2017.3
+
+------------------------------------------------------------------------------
+FOLDER 3: "Sizebox_SourecCode" (note: typo in folder name)
+------------------------------------------------------------------------------
+
+  TYPE: Scripts-only source code export -- C# files and .meta files ONLY
+  STATUS: INCOMPLETE as a Unity project
+
+  Evidence:
+    - 171 .cs files across 38 directories
+    - 206 .meta files (Unity asset metadata)
+    - Sizebox_SourecCode.sln (Visual Studio 2022 solution)
+    - Priority Queue/Priority Queue.csproj (standalone library, .NET 4.5)
+    - NO Assets/ folder
+    - NO ProjectSettings/ folder
+    - NO Library/ folder
+    - NO Packages/ folder
+    - NO .unity scene files
+    - NO .prefab files
+    - NO .shader files
+    - NO .material files
+    - NO textures, audio, or other assets
+
+  What this tells us:
+    - Someone exported ONLY the C# scripts from the Unity project
+    - The .meta files are preserved, which means GUIDs for script references
+      are intact -- this is important for reconstruction
+    - The .sln file was generated by Visual Studio 2022 (not by Unity)
+    - This represents the game's COMPLETE C# codebase but NOT the full project
+    - All game logic, AI, networking, Lua integration, VR support, and UI code
+      is present and readable
+
+================================================================================
+3. SOURCE-OF-TRUTH ASSESSMENT
+================================================================================
+
+  PRIMARY SOURCE OF TRUTH FOR CODE:
+    Sizebox_SourecCode/ -- Contains all 171 C# source files with the actual
+    game logic. This is the authoritative codebase.
+
+  PRIMARY SOURCE OF TRUTH FOR ASSETS:
+    Sizebox v3.01 - Win64 (Primary)/ -- The built game contains compiled
+    versions of all assets (scenes, prefabs, materials, shaders, textures,
+    audio) inside the .assets files and level files. These are compiled
+    and not directly editable, but they represent the complete asset state.
+
+  PRIMARY SOURCE OF TRUTH FOR UNITY VERSION:
+    Sizebox SDK/SizeboxSdk/ProjectSettings/ProjectVersion.txt
+    CONFIRMED: Unity 2017.3.0f3
+
+  PRIMARY SOURCE OF TRUTH FOR LUA BEHAVIORS:
+    Sizebox v3.01 - Win64 (Primary)/Sizebox_Data/StreamingAssets/lua/
+    Contains 71 .lua files that are the runtime behavior scripts.
+
+  PRIMARY SOURCE OF TRUTH FOR MODDING PIPELINE:
+    Sizebox SDK/ -- The complete Unity project for content creation.
+
+  MISSING SOURCE OF TRUTH:
+    The original Unity project that produced the v3.01 build. This is the
+    single most important missing piece. Without it, you have code but no
+    project structure, scenes, prefabs, materials, or asset references.
+
+================================================================================
+4. ENGINE AND TOOLCHAIN ASSESSMENT
+================================================================================
+
+  ENGINE:           Unity
+  CONFIRMED VERSION: 2017.3.0f3 (from SDK ProjectVersion.txt)
+  SCRIPTING BACKEND: Mono (MonoBleedingEdge in build -- NOT IL2CPP)
+  .NET TARGET:      .NET Framework 4.5
+  BUILD PLATFORM:   Windows 64-bit Standalone
+  IDE:              Visual Studio 2022 (from .sln format version 17)
+
+  THIRD-PARTY DEPENDENCIES (CONFIRMED):
+
+    1. MoonSharp (Lua 5.2 interpreter for C#)
+       - Used by: 25+ files with "using MoonSharp.Interpreter;"
+       - Purpose: Lua behavior scripting system
+       - Source: NuGet / Asset Store
+
+    2. RootMotion FinalIK
+       - Used by: GtsScripts/IK/GiantessIK.cs ("using RootMotion.FinalIK;")
+       - Purpose: Full-body IK, look-at, grounder systems
+       - Source: Unity Asset Store (PAID asset -- license required)
+
+    3. MMD4Mecanim
+       - Used by: GtsScripts/Giantess.cs, SDK project
+       - Purpose: MikuMikuDance model format support (PMX/VMD)
+       - Source: Unity Asset Store
+       - DLLs: MMD4MecanimInternal.dll, MMD4MecanimBulletPhysics.dll
+
+    4. BulletXNA
+       - Used by: Physics system
+       - Purpose: Bullet physics engine wrapper
+       - DLL: BulletXNA-Unity.dll
+
+    5. Unity Post-Processing Stack v1
+       - Used by: Camera/rendering system
+       - DLL: Unity.Postprocessing.Runtime.dll
+
+    6. Cubed's Unity Shaders
+       - Used by: SDK shader pipeline
+       - Purpose: Custom rendering shaders
+
+    7. Priority Queue (BlueRaja)
+       - Used by: AI/Pathfinding
+       - Purpose: A* pathfinding data structure
+       - Source: Open source (included in source)
+
+  VR PLUGINS:
+    - OVRPlugin.dll (Oculus/Meta VR SDK)
+    - openvr_api.dll (SteamVR/OpenVR)
+    - AudioPluginOculusSpatializer.dll (Oculus spatial audio)
+
+  NETWORKING:
+    - UNet (UnityEngine.Networking) -- DEPRECATED since Unity 2018
+    - Uses: NetworkBehaviour, SyncVar, ClientScene, NetworkManager
+
+================================================================================
+5. DO I NEED UNITY?
+================================================================================
+
+  YES. Absolutely.
+
+  SizeBox is a Unity game. Every aspect of it -- scenes, prefabs, materials,
+  shaders, physics, rendering, UI, asset management, build pipeline -- depends
+  on the Unity Editor. There is no way to continue development without Unity.
+
+  Specifically, you need Unity to:
+    - Reconstruct the project from source code + built assets
+    - Edit scenes, prefabs, materials, and other serialized assets
+    - Compile and test C# scripts in context
+    - Build the game executable
+    - Use the SDK's model export pipeline
+    - Debug and profile the game
+
+  The Lua behavior scripts can be edited with any text editor (they are plain
+  .lua files loaded at runtime), but this only covers AI behaviors -- not core
+  game systems, rendering, physics, or UI.
+
+================================================================================
+6. RECOMMENDED UNITY VERSION AND WHY
+================================================================================
+
+  RECOMMENDED STARTING VERSION: Unity 2017.3.0f3
+
+  WHY:
+    1. CONFIRMED: The SDK's ProjectVersion.txt specifies exactly 2017.3.0f3
+    2. The source code uses APIs consistent with Unity 2017:
+       - UnityEngine.Networking (UNet -- removed in later versions)
+       - UnityEngine.VR namespace (renamed to UnityEngine.XR in 2017.2+)
+       - Conditional compilation: #if ENABLE_VR
+    3. The built game's modular DLL structure (80+ UnityEngine.*.dll) matches
+       Unity 2017.3's module organization
+    4. Opening the SDK in this exact version is guaranteed to work (Library/ exists)
+    5. The source code will compile without API migration issues
+
+  MIGRATION CONSIDERATIONS:
+    - Unity 2017.3 is very old (released Dec 2017). It lacks:
+      - Modern render pipelines (URP/HDRP)
+      - Addressables asset system
+      - Modern Input System (though Unity.InputSystem.dll is present in build)
+      - Many quality-of-life improvements
+    - UNet was deprecated in Unity 2018 and removed later. Upgrading Unity
+      versions WILL break the networking code.
+    - UnityEngine.VR was renamed to UnityEngine.XR. Migration required for VR
+      code in newer Unity versions.
+    - Post-processing v1 was replaced by v2/v3 in later Unity versions.
+
+  DOWNLOAD: Unity 2017.3.0f3 is available from Unity's archive:
+    Unity Download Archive > Unity 2017.x
+
+  ALTERNATIVE: If you plan to modernize eventually, consider:
+    - Phase 1: Get running on 2017.3.0f3 first (safest)
+    - Phase 2: Migrate to Unity 2019.4 LTS (last version with UNet support)
+    - Phase 3: Replace UNet with Mirror or Netcode for GameObjects
+    - Phase 4: Migrate to Unity 2021/2022 LTS
+
+================================================================================
+7. ARCHITECTURE OVERVIEW
+================================================================================
+
+  The game follows a SINGLETON-HEAVY, COMPONENT-BASED architecture typical of
+  Unity 2017-era projects. Key architectural patterns:
+
+  DESIGN PATTERNS USED:
+    - Singleton (GameController, IOManager, ObjectManager, StateManager,
+      MainController)
+    - Strategy (IDecisionMaker -> GTSDecisionMaker, MicroDecisionMaker)
+    - Observer (EventManager pub/sub, SyncVar hooks)
+    - Command (Action queue execution in AIController)
+    - Factory (Behavior creation from Lua via MoonSharp)
+    - MVC (UI system: View/, Controller/, Model/ folders)
+    - Component (Unity's AddComponent<T> throughout)
+    - State Machine (MainController scene states, BehaviorQueue)
+
+  CLASS HIERARCHY:
+    MonoBehaviour
+    +-- EntityBase (NetworkBehaviour)
+        +-- Humanoid
+        |   +-- Giantess (giant characters)
+        +-- Micro (tiny characters)
+            +-- Player (player-controlled character)
+            +-- MicroNPC (AI-controlled tiny characters)
+
+  CORE MANAGERS (Singletons):
+    - GameController: Global game state, settings, player tracking
+    - MainController: Scene management and transitions
+    - IOManager: Runtime asset loading (models, audio, shaders)
+    - ObjectManager: Network entity spawning (UNet)
+    - EventManager: Global pub/sub event system
+    - StateManager: Game state persistence
+    - SoundManager: Audio management
+    - LuaManager: Lua script loading and execution
+    - PreferencesCentral: User settings/preferences
+
+  DUAL SCRIPTING ARCHITECTURE:
+    The game uses a hybrid C#/Lua architecture:
+    - C# handles core systems (physics, rendering, networking, IK, UI)
+    - Lua handles AI behaviors (loaded from StreamingAssets at runtime)
+    - LuaManager + 18 LuaBinding classes bridge the two layers
+    - MoonSharp interpreter provides Lua 5.2 compliance
+
+================================================================================
+8. MAJOR SYSTEMS IDENTIFIED
+================================================================================
+
+  SYSTEM                  | FILES | STATUS    | NOTES
+  ------------------------+-------+-----------+----------------------------------
+  Giantess System         |  14   | CONFIRMED | Core gameplay: giant characters,
+                          |       |           | body physics, mesh generation,
+                          |       |           | collision detection, IK (6 files)
+  ------------------------+-------+-----------+----------------------------------
+  AI / Behavior System    |  26   | CONFIRMED | AIController, decision makers
+                          |       |           | (GTS/Micro), behavior queue,
+                          |       |           | action system (14 action types),
+                          |       |           | A* pathfinding, mental state
+  ------------------------+-------+-----------+----------------------------------
+  Lua Scripting           |  20   | CONFIRMED | MoonSharp integration, 18 binding
+                          |       |           | classes exposing game APIs to Lua,
+                          |       |           | 71 shipped Lua scripts
+  ------------------------+-------+-----------+----------------------------------
+  UI System               |  25   | CONFIRMED | MVC pattern, main view, edit mode,
+                          |       |           | pause menu (5 screens), character
+                          |       |           | select, stage select, save window,
+                          |       |           | animation/morph/pose/transform views
+  ------------------------+-------+-----------+----------------------------------
+  Agent/Character System  |  11   | CONFIRMED | EntityBase (NetworkBehaviour),
+                          |       |           | Humanoid, Micro, animation mgr,
+                          |       |           | walk controller, size changer
+  ------------------------+-------+-----------+----------------------------------
+  Camera System           |   8   | CONFIRMED | Main camera, player camera,
+                          |       |           | VR camera, sim cam, camera shake,
+                          |       |           | effects settings, center origin
+  ------------------------+-------+-----------+----------------------------------
+  Audio System            |   7   | CONFIRMED | SoundManager, CustomAudioSource,
+                          |       |           | AudioLoader, voice/footstep effects,
+                          |       |           | Lua audio binding
+  ------------------------+-------+-----------+----------------------------------
+  Level/World System      |   9   | CONFIRMED | Map settings, terrain, water,
+                          |       |           | trees, space script, destructibles
+  ------------------------+-------+-----------+----------------------------------
+  Player System           |   5   | CONFIRMED | Player controller, IK, client/
+                          |       |           | server split, resize character
+  ------------------------+-------+-----------+----------------------------------
+  NPC System              |   5   | CONFIRMED | Spawner, micro NPC, obstacle
+                          |       |           | detection, auto-configure, tanks
+  ------------------------+-------+-----------+----------------------------------
+  VR System               |   3+  | CONFIRMED | VRCamera (Oculus, OpenVR, stereo,
+                          |       |           | split modes), player VR flag,
+                          |       |           | boot.config vr-enabled=1
+  ------------------------+-------+-----------+----------------------------------
+  Networking (UNet)       |   7+  | CONFIRMED | NetworkBehaviour entities, SyncVar,
+                          |       |           | client/server player split,
+                          |       |           | spawn handlers. DEPRECATED API.
+  ------------------------+-------+-----------+----------------------------------
+  Runtime Asset Loading   |   2   | CONFIRMED | IOManager loads models from disk
+                          |       |           | folders (Models/Giantess, Models/
+                          |       |           | Player, etc.), AudioLoader
+  ------------------------+-------+-----------+----------------------------------
+  Procedural Generation   |   2   | CONFIRMED | CityBuilder + CityBuilding,
+                          |       |           | Perlin noise, tile-based roads
+  ------------------------+-------+-----------+----------------------------------
+  IK System               |   6   | CONFIRMED | RootMotion FinalIK integration,
+                          |       |           | full body, hand, head, pose IK
+  ------------------------+-------+-----------+----------------------------------
+  Vehicle System          |   3   | CONFIRMED | Enter/exit, input controller,
+                          |       |           | standard car control
+  ------------------------+-------+-----------+----------------------------------
+  Save/State System       |   3   | CONFIRMED | StateManager, SaveWindow,
+                          |       |           | PreferencesCentral
+  ------------------------+-------+-----------+----------------------------------
+  Editor Tooling          |   3   | CONFIRMED | EditorScripts, ModelImportSettings,
+                          |       |           | SampleClip
+  ------------------------+-------+-----------+----------------------------------
+  Event System            |   1   | CONFIRMED | EventManager (pub/sub for crush,
+                          |       |           | step, and other game events)
+  ------------------------+-------+-----------+----------------------------------
+
+  TOTAL: 18 major systems, 171 C# files, ~30,000+ LOC
+
+================================================================================
+9. RISKS, MISSING PIECES, AND LIKELY BREAKAGES
+================================================================================
+
+  ---- CRITICAL RISKS ----
+
+  [RISK-01] INCOMPLETE PROJECT (SEVERITY: CRITICAL)
+    The Sizebox_SourecCode folder is NOT a full Unity project. It is missing:
+      - All .unity scene files (9 scenes referenced in build)
+      - All .prefab files
+      - All .shader files
+      - All .material files
+      - All textures and audio assets
+      - ProjectSettings/ folder
+      - Packages/ folder
+      - Any asset bundles
+    IMPACT: Cannot open in Unity as-is. Full project reconstruction required.
+    EVIDENCE: No Assets/, ProjectSettings/, Library/ folders in source dump.
+
+  [RISK-02] DEPRECATED NETWORKING (SEVERITY: HIGH)
+    The game uses UNet (UnityEngine.Networking), which was deprecated in Unity
+    2018.x and progressively removed. Key classes affected:
+      - EntityBase extends NetworkBehaviour
+      - SyncVar attributes on network-synced properties
+      - ClientScene.RegisterSpawnHandler for entity spawning
+      - NetworkManager singleton pattern
+    IMPACT: Cannot upgrade past Unity 2019.4 without replacing entire
+    networking layer. Migration to Mirror or Netcode for GameObjects required.
+    EVIDENCE: "using UnityEngine.Networking;" in 7+ files
+
+  [RISK-03] PAID ASSET STORE DEPENDENCIES (SEVERITY: HIGH)
+    RootMotion FinalIK is a PAID Unity Asset Store package ($90+).
+      - Used extensively in GtsScripts/IK/ (6 files)
+      - Classes: FullBodyBipedIK, LookAtIK, GrounderFBBIK
+    Without a valid license or the original package files, the IK system
+    will not compile.
+    EVIDENCE: "using RootMotion.FinalIK;" in GiantessIK.cs
+
+  [RISK-04] LEGACY VR API (SEVERITY: MEDIUM)
+    Uses UnityEngine.VR namespace (renamed to UnityEngine.XR in Unity 2017.2+).
+    VR code uses:
+      - VRSettings.LoadDeviceByName() (deprecated)
+      - VRSettings.enabled (deprecated)
+    The #if ENABLE_VR preprocessor guards help, but VR will need migration
+    to XR Plugin Management for modern Unity versions.
+    EVIDENCE: Camera/VRCamera.cs uses UnityEngine.VR
+
+  [RISK-05] MMD4MECANIM AVAILABILITY (SEVERITY: MEDIUM)
+    MMD4Mecanim may no longer be available or maintained for modern Unity.
+    It was a specialized plugin for MikuMikuDance model support.
+    The DLLs are present in the SDK and build, but source is not available.
+    EVIDENCE: MMD4MecanimInternal.dll in both SDK and build
+
+  ---- MODERATE RISKS ----
+
+  [RISK-06] NO VERSION CONTROL HISTORY
+    The project has no .git folder. There is no commit history, no branches,
+    no record of what changed between versions or why.
+    IMPACT: Cannot understand evolution of the code. Cannot revert changes.
+    Cannot identify who wrote what or when.
+
+  [RISK-07] SINGLETON-HEAVY ARCHITECTURE
+    Nearly every major system uses a singleton pattern. This creates tight
+    coupling and makes testing, refactoring, and feature isolation difficult.
+    Not a blocker, but increases maintenance burden.
+
+  [RISK-08] UNITY 2017 LIMITATIONS
+    Unity 2017.3 lacks many modern features:
+      - No Addressables (asset management)
+      - No Universal Render Pipeline
+      - No modern Input System (though DLL present in build)
+      - No Package Manager (uses UnityPackageManager, the predecessor)
+      - Limited C# language version (no async/await, no pattern matching)
+
+  [RISK-09] POTENTIAL ASSET MISMATCH
+    The built game may have been built from a DIFFERENT version of the source
+    code than what's in Sizebox_SourecCode. There's no way to verify they
+    match without the original Unity project.
+
+  [RISK-10] MONO SCRIPTING BACKEND SECURITY
+    The Mono build means Assembly-CSharp.dll in the built game can be
+    decompiled with tools like ILSpy or dnSpy. This is useful for verification
+    but means the shipped code is essentially open.
+
+  ---- MISSING PIECES ----
+
+  [MISSING-01] Original Unity project (scenes, prefabs, materials, etc.)
+  [MISSING-02] RootMotion FinalIK asset package or license
+  [MISSING-03] Git history / version control
+  [MISSING-04] Build pipeline configuration / CI/CD
+  [MISSING-05] Developer documentation (code-level docs, architecture notes)
+  [MISSING-06] Test suite (only 2 test files found: MorphChanger, SkinnedCollisionHelper)
+  [MISSING-07] Original model/texture source files
+  [MISSING-08] Any configuration files for game settings beyond PlayerPrefs
+
+================================================================================
+10. FASTEST PATH TO RESUME DEVELOPMENT
+================================================================================
+
+  There are TWO realistic paths, depending on your goals:
+
+  ---- PATH A: RECONSTRUCT THE UNITY PROJECT (RECOMMENDED) ----
+
+  This path rebuilds the missing Unity project structure around the existing
+  source code.
+
+    Step 1: Install Unity 2017.3.0f3 from the Unity Archive
+    Step 2: Create a new empty Unity project
+    Step 3: Copy ProjectSettings from the SDK project as a starting baseline
+    Step 4: Copy all 171 .cs files + .meta files into Assets/Scripts/
+    Step 5: Acquire and import required packages:
+              - RootMotion FinalIK (purchase from Asset Store)
+              - MMD4Mecanim (from SDK project's Assets/MMD4Mecanim/)
+              - BulletXNA (from SDK project's Assets/BulletXNA/)
+              - MoonSharp (NuGet or Asset Store)
+              - Post-Processing Stack v1 (from SDK or Asset Store)
+              - Cubed's Unity Shaders (from SDK)
+    Step 6: Copy StreamingAssets/lua/ from the built game into the project
+    Step 7: Decompile Assembly-CSharp.dll from the build using ILSpy/dnSpy
+            to verify source completeness and identify any missing scripts
+    Step 8: Reconstruct scenes by examining the built game's level data
+            and creating new scenes with the correct object hierarchies
+    Step 9: Set up the Models/ runtime loading folder structure
+    Step 10: Attempt to compile and resolve errors iteratively
+
+  ESTIMATED EFFORT: 2-4 weeks for a developer familiar with Unity
+  RISK: Medium-High (scenes and prefabs must be reconstructed manually)
+
+  ---- PATH B: DECOMPILE + RECONSTRUCT (FALLBACK) ----
+
+  If the source code is incomplete or doesn't match the build:
+
+    Step 1: Use UABE (Unity Asset Bundle Extractor) or AssetRipper to
+            extract ALL assets from the built game's .assets files
+    Step 2: This can recover scenes, prefabs, materials, shaders, textures,
+            and scripts from the compiled build
+    Step 3: Use the extracted project as a starting point
+    Step 4: Replace decompiled scripts with the actual source code
+    Step 5: Fix up any references that broke during extraction
+
+  ESTIMATED EFFORT: 1-3 weeks
+  RISK: Medium (extraction tools may not perfectly reconstruct all references)
+
+  ---- PATH C: LUA-ONLY MODDING (MINIMAL EFFORT) ----
+
+  If you only want to modify AI behaviors without touching C# code:
+
+    Step 1: Edit Lua files directly in the built game's StreamingAssets/lua/
+    Step 2: Run the game and test changes (Lua is loaded at runtime)
+    Step 3: No Unity installation needed for this path
+
+  ESTIMATED EFFORT: Immediate
+  LIMITATION: Only AI behaviors can be modified. No access to core systems.
+
+================================================================================
+11. RECOMMENDED NEXT 7 STEPS
+================================================================================
+
+  STEP 1: INSTALL UNITY 2017.3.0f3
+    Download from Unity Archive. Install with Windows Build Support.
+    Verify the SDK project (Sizebox SDK/SizeboxSdk/) opens cleanly.
+    This confirms your toolchain works.
+
+  STEP 2: VERIFY SOURCE COMPLETENESS
+    Decompile Assembly-CSharp.dll from the built game using ILSpy or dnSpy.
+    Compare the decompiled class list against the 171 .cs files in source.
+    Identify any classes present in the DLL but missing from source.
+    Document any discrepancies.
+
+  STEP 3: ATTEMPT ASSET EXTRACTION
+    Use AssetRipper (https://github.com/AssetRipper/AssetRipper) to extract
+    the built game's assets into a Unity project structure. This can recover
+    scenes, prefabs, materials, and other serialized assets. Even if imperfect,
+    it gives you a massive head start over manual reconstruction.
+
+  STEP 4: ACQUIRE DEPENDENCIES
+    - Purchase RootMotion FinalIK from the Unity Asset Store
+    - Copy MMD4Mecanim from the SDK project
+    - Copy BulletXNA from the SDK project
+    - Install MoonSharp via NuGet or Asset Store
+    - Copy shaders and post-processing from the SDK
+
+  STEP 5: CREATE THE RECONSTRUCTED PROJECT
+    Merge the extracted assets (Step 3) with the actual source code (Step 4
+    dependencies). Replace any decompiled scripts with the original source.
+    Attempt compilation. Resolve errors systematically.
+
+  STEP 6: INITIALIZE VERSION CONTROL
+    Create a Git repository immediately. Commit the reconstructed project.
+    Add .gitignore for Unity (exclude Library/, Temp/, obj/, *.csproj, *.sln).
+    This gives you a safety net for all future work.
+
+  STEP 7: VALIDATE BY RUNNING
+    Enter Play mode in the Unity Editor. Compare behavior against the built
+    game. Document what works and what doesn't. Create a bug/task list for
+    remaining reconstruction work.
+
+================================================================================
+12. OPEN QUESTIONS
+================================================================================
+
+  Q1: Does the source code in Sizebox_SourecCode match the compiled
+      Assembly-CSharp.dll in the v3.01 build exactly, or is it from a
+      different version?
+      ACTION: Decompile and compare.
+
+  Q2: Are there any scripts in the compiled DLL that are NOT present in
+      the source code folder?
+      ACTION: Decompile and diff class lists.
+
+  Q3: Does the original developer (Aiiko) have the full Unity project
+      available for handoff? A complete project would eliminate the
+      biggest blocker.
+      ACTION: Ask your friend.
+
+  Q4: Is a RootMotion FinalIK license included or transferable?
+      ACTION: Check with original developer. May need to purchase new license.
+
+  Q5: Was the game ever built with IL2CPP, or always Mono?
+      FINDING: The v3.01 build is Mono. Unknown if other builds existed.
+
+  Q6: Is multiplayer (UNet) actively used, or is it vestigial?
+      FINDING: Client/server architecture exists in code. Unknown if the
+      shipped game actually enables multiplayer.
+
+  Q7: Are there other versions of the source code or project files that
+      weren't included in this handoff?
+
+  Q8: Is there a community of modders using the SDK who might have
+      additional knowledge or assets?
+
+  Q9: What is the licensing status of all third-party packages used?
+      Specifically: FinalIK, MMD4Mecanim, BulletXNA, Cubed's Shaders.
+
+  Q10: Was the game distributed commercially or as freeware?
+       This affects licensing obligations for dependencies.
+
+================================================================================
+13. CONFIDENCE LEVEL
+================================================================================
+
+  OVERALL CONFIDENCE: 85% -- HIGH
+
+  Breakdown:
+    - Unity version identification:        99% (ProjectVersion.txt is definitive)
+    - Source code completeness:             80% (looks complete but unverified
+                                                 against compiled DLL)
+    - Architecture understanding:           90% (clear patterns, well-organized)
+    - Dependency identification:            85% (major deps found; may miss
+                                                 some Asset Store packages)
+    - Reconstruction feasibility:           75% (doable but significant effort;
+                                                 scene reconstruction is the
+                                                 biggest unknown)
+    - Build folder assessment:              95% (standard Unity build, well
+                                                 understood)
+    - SDK assessment:                       95% (complete Unity project, opens
+                                                 in Unity 2017.3)
+    - Risk identification:                  85% (covered major risks; unknown
+                                                 unknowns may exist in the
+                                                 asset layer)
+
+================================================================================
+14. DECISION: CAN THIS GAME REALISTICALLY BE CONTINUED?
+================================================================================
+
+  YES, but with significant upfront reconstruction work.
+
+  The handoff provides:
+    [+] Complete C# source code (171 files, ~30,000+ LOC)
+    [+] A working, playable build to reference and extract from
+    [+] A complete SDK Unity project confirming the exact Unity version
+    [+] All Lua behavior scripts (71 files)
+    [+] SDK with shared dependencies (MMD4Mecanim, BulletXNA, shaders)
+    [+] .meta files with GUIDs (critical for maintaining asset references)
+
+  The handoff is missing:
+    [-] The original Unity project (scenes, prefabs, materials, etc.)
+    [-] RootMotion FinalIK package (must be purchased)
+    [-] Version control history
+    [-] Developer documentation
+
+  The critical gap -- the missing Unity project -- can be bridged using asset
+  extraction tools (AssetRipper) on the compiled build. This is a well-
+  understood process in the Unity community. Combined with the actual source
+  code, it should be possible to reconstruct a fully functional, editable
+  project.
+
+  REALISTIC TIMELINE TO FIRST EDITABLE BUILD:
+    - Optimistic: 1-2 weeks (if asset extraction goes smoothly)
+    - Realistic:  3-4 weeks (accounting for troubleshooting)
+    - Pessimistic: 6-8 weeks (if major reconstruction issues arise)
+
+  RECOMMENDATION: Proceed. The materials provided are sufficient for
+  continuation. Start with Step 1 (install Unity 2017.3.0f3) and Step 3
+  (asset extraction) in parallel.
+
+================================================================================
+  END OF REPORT
+================================================================================
+
+  Report prepared by automated investigation system
+  Date: 2026-03-14
+  Agents used: 5 parallel exploration agents
+  Files analyzed: 171 C# source files, 94 managed DLLs, 71 Lua scripts,
+                  206 .meta files, project settings, build configuration
+  Total investigation scope: ~500+ files across 3 project folders
