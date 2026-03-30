@@ -208,34 +208,26 @@ namespace SizeboxFix
                 Plugin.Log.LogInfo("[AI] Found " + (names.Count) + " morphs for AI control");
             }
 
-            // Cache a curated subset of animation names (sending all 2869 is too slow)
+            // Cache only default game animations (not custom model ones)
             _cachedAnimNames = null;
             if (IOManager.Instance != null && IOManager.Instance.AnimationControllers != null)
             {
-                var allAnims = new List<string>(IOManager.Instance.AnimationControllers.Keys);
+                var allAnims = IOManager.Instance.AnimationControllers;
+                var defaultController = IOManager.Instance.gtsAnimatorController;
                 Plugin.Log.LogInfo("[AI] Found " + allAnims.Count + " animations total");
 
-                // Pick ~50 interesting ones by keyword
-                string[] keywords = { "sit", "dance", "walk", "idle", "crouch", "kneel", "pose",
-                    "sexy", "cute", "happy", "laugh", "wave", "look", "femini", "mastur",
-                    "kiss", "hug", "bow", "squat", "lay", "sleep", "crawl", "twerk", "strip" };
-                var picked = new List<string>();
-                foreach (var anim in allAnims)
+                var defaultAnims = new List<string>();
+                foreach (var kvp in allAnims)
                 {
-                    string lower = anim.ToLower();
-                    foreach (var kw in keywords)
-                    {
-                        if (lower.Contains(kw) && picked.Count < 60)
-                        {
-                            picked.Add(anim);
-                            break;
-                        }
-                    }
+                    if (kvp.Value == defaultController)
+                        defaultAnims.Add(kvp.Key);
                 }
-                if (picked.Count > 0)
+                defaultAnims.Sort();
+
+                if (defaultAnims.Count > 0)
                 {
-                    _cachedAnimNames = string.Join(", ", picked.ToArray());
-                    Plugin.Log.LogInfo("[AI] Curated " + picked.Count + " animations for AI");
+                    _cachedAnimNames = string.Join(", ", defaultAnims.ToArray());
+                    Plugin.Log.LogInfo("[AI] Using " + defaultAnims.Count + " default animations for AI");
                 }
             }
 
