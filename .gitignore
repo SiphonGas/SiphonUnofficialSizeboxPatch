@@ -25,7 +25,8 @@ Sizebox SDK/
 Library/
 Temp/
 obj/
-*.csproj
+# Keep SizeboxFix.csproj (force-add it)
+# *.csproj  -- removed so our project file is tracked
 *.sln
 *.suo
 *.user
@@ -51,10 +52,23 @@ obj/
 Thumbs.db
 Desktop.ini
 
-# Secrets
+# Secrets & API keys
 .env
 *.env
 credentials*
+SizeboxAI.cfg
+
+# BepInEx runtime (users install their own)
+Sizebox v3.01 - Win64 (Primary)/BepInEx/
+Sizebox v3.01 - Win64 (Primary)/doorstop_config.ini
+Sizebox v3.01 - Win64 (Primary)/winhttp.dll
+
+# Build output (distributed as release)
+src/SizeboxFix/bin/
+src/SizeboxFix/obj/
+
+# Local config
+.config/
 
 # Claude Code / RuFlo config (local tooling)
 .claude/

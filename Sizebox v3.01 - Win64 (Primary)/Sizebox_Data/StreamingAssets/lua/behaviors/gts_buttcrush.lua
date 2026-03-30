@@ -1,72 +1,90 @@
 Buttcrush = RegisterBehavior("Buttcrush")
+Buttcrush.scores = {
+    normal = 15
+}
 Buttcrush.data = {
-    agent = { type = {"giantess"} },
-    target = { type = {"micro"} },
     menuEntry = "Interaction/Buttcrush",
     ai = true,
-    tags = "giantess, interaction"
+    agent = { type = {"giantess"} },
+    target = { type = {"micro", "player"} },
+    tags = "macro, interaction, evil",
+    settings = {
+        {"tauntAfter", "Taunt After Crush", "bool", true},
+        {"groundPound", "Ground Pound (jump)", "bool", false}
+    }
 }
 
+SIT_ANIM = "Sit 6"
+JUMP_ANIM = "Jump 4"
+IDLE_ANIM = "Idle 2"
+WALK_ANIM = "Walk"
+TAUNT_ANIMS = {"Laughing", "Insult", "Loser", "Taunt 3", "Happy", "Fist Pump", "Whatever Gesture"}
+
+WALKING, WAITING, SITTING, TAUNTING = 0, 1, 2, 3
+
 function Buttcrush:Start()
-    self:_MoveToSeatPoint()
-    self.lastTargetPos = self.target.position
-    self.pauseDelay = 0
+    if not self.target then
+        self.agent.ai.StopBehavior()
+        return
+    end
+    self.state = WALKING
+    self.agent.animation.Set(WALK_ANIM)
+    self.agent.MoveTo(self.target)
 end
 
 function Buttcrush:Update()
-    if not self.agent.ai.IsActionActive() then
-        if self.pauseDelay == 0 then
-            self.agent.animation.Set("Sit 6")
-            self.pauseDelay = self.agent.animation.GetLength() + 1
-        else
-            self.pauseDelay = self.pauseDelay - Time.deltaTime
-            if self.pauseDelay <= 0 then
-                self.agent.ai.StopBehavior()
-                return
-            end
-        end
+    if not self.target then
+        self.agent.ai.StopBehavior()
         return
     end
 
-    -- re-path only if target moved noticeably
-    if Vector3.Distance(self.lastTargetPos, self.target.position) > (self.target.scale * 0.25) then
-        self.agent.ai.StopAction()
-        self:_MoveToSeatPoint()
-        self.lastTargetPos = self.target.position
+    if self.state == WALKING then
+        -- Wait until GTS arrives near target
+        if not self.agent.ai.IsActionActive() then
+            -- Arrived. Look at target then sit.
+            self.agent.lookAt(self.target)
+            self.state = WAITING
+            self.waitStart = Time.time
+            self.agent.animation.Set(IDLE_ANIM)
+        end
+
+    elseif self.state == WAITING then
+        -- Brief pause before sitting (lets her face the target)
+        if (Time.time - self.waitStart) > 0.5 then
+            self.state = SITTING
+            self.sitStart = Time.time
+
+            if self.groundPound then
+                self.agent.animation.Set(JUMP_ANIM)
+            else
+                self.agent.animation.Set(SIT_ANIM)
+            end
+        end
+
+    elseif self.state == SITTING then
+        -- Wait for animation to reach impact, then crush
+        local delay = self.groundPound and 0.8 or 1.2
+        if (Time.time - self.sitStart) > delay then
+            self.agent.Stomp(self.target)
+
+            if self.tauntAfter then
+                self.state = TAUNTING
+                self.tauntStart = Time.time
+                local anim = TAUNT_ANIMS[math.random(1, #TAUNT_ANIMS)]
+                self.agent.animation.Set(anim)
+            else
+                self.agent.ai.StopBehavior()
+            end
+        end
+
+    elseif self.state == TAUNTING then
+        if (Time.time - self.tauntStart) > 3 then
+            self.agent.ai.StopBehavior()
+        end
     end
 end
 
 function Buttcrush:Exit()
-    self.agent.animation.Set("Idle")
-end
-
--- === New helpers ===
-
--- Distance to sit behind the target along the agent→target line
-function Buttcrush:_DesiredBackoff()
-    -- tweakable cushion: half a target, quarter an agent
-    return (self.target.scale * 0.5) + (self.agent.scale * 0.25)
-end
-
--- Tiny lateral jitter so we don't aim exactly center (optional)
-function Buttcrush:_SideJitter()
-    return 0 -- or: (math.random() - 0.5) * 0.15 * (self.target.scale + self.agent.scale)
-end
-
-function Buttcrush:_SeatPoint()
-    local toTarget = (self.target.position - self.agent.position).normalized
-    local right = Vector3.Cross(toTarget, Vector3.up).normalized
-    local p = self.target.position
-              - toTarget * self:_DesiredBackoff()
-              + right * self:_SideJitter()
-
-    -- keep on ground plane near agent
-    p.y = self.agent.position.y
-    return p
-end
-
-function Buttcrush:_MoveToSeatPoint()
-    local dst = self:_SeatPoint()
-    self.agent.animation.Set("Walk")
-    self.agent.MoveTo(dst)
+    self.agent.animation.Set(IDLE_ANIM)
+    self.agent.lookAt(nil)
 end
