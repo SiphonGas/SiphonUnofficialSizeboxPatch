@@ -1,6 +1,12 @@
 # Siphon's Unofficial Sizebox Patch
 
+> *"We choose to goon to the moon!"*
+
 A BepInEx plugin for Sizebox v3.01 that fixes critical bugs and adds new features.
+
+## Disclaimer
+
+This is an **unofficial, personal project**. I am not a developer of Sizebox and have no affiliation with the Sizebox development team. This mod is provided as-is with no warranty. Use at your own risk. I am not responsible for any issues, crashes, broken saves, corrupted installations, or anything else that may result from using this plugin. Always back up your game files before installing mods.
 
 ## Bug Fixes
 
