@@ -1857,4 +1857,82 @@ namespace SizeboxFix
             }
         }
     }
+
+    // === Fix 15: Material Presets scroll fix ===
+    // The presets list has no ScrollRect, so when there are many presets
+    // you can't scroll down to see them all.
+    [HarmonyPatch]
+    static class MaterialPresetScrollFix
+    {
+        static System.Type _basePresetsType;
+
+        static bool Prepare()
+        {
+            _basePresetsType = AccessTools.TypeByName("SizeboxUI.BasePresetsView")
+                ?? AccessTools.TypeByName("BasePresetsView");
+            return _basePresetsType != null;
+        }
+
+        static MethodBase TargetMethod()
+        {
+            return AccessTools.Method(_basePresetsType, "OnEnable");
+        }
+
+        static void Postfix(object __instance)
+        {
+            try
+            {
+                var fileEntryParentField = AccessTools.Field(_basePresetsType, "fileEntryParent");
+                if (fileEntryParentField == null) return;
+
+                var fileEntryParent = fileEntryParentField.GetValue(__instance) as RectTransform;
+                if (fileEntryParent == null) return;
+
+                // Check if ScrollRect already exists on parent
+                var existingScroll = fileEntryParent.GetComponentInParent<UnityEngine.UI.ScrollRect>();
+                if (existingScroll != null) return;
+
+                // Wrap the file entry parent in a scroll view
+                Transform container = fileEntryParent.parent;
+                if (container == null) return;
+
+                // Add ScrollRect to the container
+                var scrollRect = container.gameObject.GetComponent<UnityEngine.UI.ScrollRect>();
+                if (scrollRect == null)
+                    scrollRect = container.gameObject.AddComponent<UnityEngine.UI.ScrollRect>();
+
+                scrollRect.content = fileEntryParent;
+                scrollRect.vertical = true;
+                scrollRect.horizontal = false;
+                scrollRect.movementType = UnityEngine.UI.ScrollRect.MovementType.Clamped;
+                scrollRect.scrollSensitivity = 30f;
+
+                // Add mask so entries don't render outside the container
+                var mask = container.gameObject.GetComponent<UnityEngine.UI.Mask>();
+                if (mask == null)
+                    mask = container.gameObject.AddComponent<UnityEngine.UI.Mask>();
+                mask.showMaskGraphic = true;
+
+                // Ensure container has an Image for the mask
+                var img = container.gameObject.GetComponent<UnityEngine.UI.Image>();
+                if (img == null)
+                {
+                    img = container.gameObject.AddComponent<UnityEngine.UI.Image>();
+                    img.color = new Color(0, 0, 0, 0.01f); // Nearly invisible
+                }
+
+                // Make content expand with entries
+                var csf = fileEntryParent.gameObject.GetComponent<ContentSizeFitter>();
+                if (csf == null)
+                    csf = fileEntryParent.gameObject.AddComponent<ContentSizeFitter>();
+                csf.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+                Plugin.Log.LogInfo("[Fix15] Added scroll to presets view");
+            }
+            catch (System.Exception ex)
+            {
+                Plugin.Log.LogError("[Fix15] Preset scroll fix failed: " + ex.Message);
+            }
+        }
+    }
 }
