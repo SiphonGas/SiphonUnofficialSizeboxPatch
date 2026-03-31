@@ -80,3 +80,7 @@ Sizebox v3.01 - Win64 (Primary)/Sizebox_Data/StreamingAssets/lua/doc/
 
 # Shortcut files
 *.lnk
+
+# Personal files
+*Findings*
+*findings*
