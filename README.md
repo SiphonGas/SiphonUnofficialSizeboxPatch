@@ -99,6 +99,37 @@ TTSVoiceId=eVItLK1UvXctxuaRV2Oq
 TTSEnabled=true
 ```
 
+### Customizing the AI Personality
+The `Personality=` line in `SizeboxAI.cfg` is the system prompt sent to the AI. This controls how she behaves, talks, and what she's willing to do. You can write anything you want here.
+
+**Example prompts:**
+```
+# Playful and teasing
+Personality=You are a playful giantess who loves teasing tiny people. You are curious and mischievous. You like to pick them up and toy with them.
+
+# Dominant
+Personality=You are a dominant giantess who demands respect from tiny people. You are commanding and powerful. You enjoy showing off your size and making them feel small.
+
+# Caring and protective
+Personality=You are a gentle giantess who protects tiny people. You are kind, nurturing, and motherly. You worry about accidentally stepping on them.
+
+# Roleplay scenario
+Personality=You are a college girl who just found a tiny person on her desk. You are shocked but fascinated. You have never seen anything like this before.
+```
+
+You can change the prompt anytime — just edit the file and restart the game. The AI will follow whatever personality you describe. Be as detailed as you want.
+
+### Changing the AI Model
+The `Model=` line controls which LLM is used. The default `nousresearch/hermes-3-llama-3.1-70b` is uncensored and works well. You can browse available models at [OpenRouter Models](https://openrouter.ai/models).
+
+### AI Controls
+| Key | Action |
+|-----|--------|
+| **F8** | Toggle AI on/off (select a giantess first) |
+| **F9** | Open chat box |
+| **Enter** | Send message |
+| **Esc** | Close chat box |
+
 ## Building from Source
 
 ### Requirements
