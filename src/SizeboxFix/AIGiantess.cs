@@ -46,12 +46,18 @@ namespace SizeboxFix
         private List<string> _recentActions = new List<string>();
         private List<string> _recentDialogue = new List<string>();
         private Coroutine _moveCoroutine;
+        private bool _inConversation; // True after player sends a message
+        private float _conversationTimeout; // When to go back to auto mode
+        private float _lastAnimTime; // When last animation was played
+        private const float ANIM_COOLDOWN = 5f;
+        private const float AUTO_INTERVAL = 20f;
+        private const float CONVERSATION_TIMEOUT = 30f; // Go back to auto after 30s of silence
 
         // On-screen chat log
         internal static List<string> _chatLog = new List<string>();
         internal static float _chatLogTimer;
         private const int MAX_CHAT_LINES = 6;
-        private const float CHAT_DISPLAY_TIME = 15f;
+        internal const float CHAT_DISPLAY_TIME = 15f;
         private string _cachedMorphNames;
         private string _cachedAnimNames;
         private string _playerMessage; // Message from player to AI
@@ -67,16 +73,16 @@ namespace SizeboxFix
 
         private static readonly Dictionary<string, string> ACTION_ANIMS = new Dictionary<string, string>
         {
-            {"walk_to_player", "Walk"},
+            {"walk_to_player", "Female Walk"},
             {"crouch_look", "Crouch Idle"},
             {"stand_idle", "Idle 2"},
-            {"wander", "Walk"},
+            {"wander", "Walking 2"},
             {"stomp_near", "Stomping"},
             {"sit_down", "Sit 6"},
             {"grab_player", "Acknowledging"},
             {"taunt", "Taunt 3"},
             {"look_at_player", "Look Down"},
-            {"walk_away", "Walk"},
+            {"walk_away", "Walking"},
             {"dance", "Excited"},
             {"crouch_idle", "Crouch Idle"},
             {"grow", "Happy"},
@@ -245,11 +251,13 @@ namespace SizeboxFix
         public void SendPlayerMessage(string msg)
         {
             _playerMessage = msg;
-            // Add to conversation history as a user message
             _conversationHistory.Add("{\"role\":\"user\",\"content\":" + JsonEscape("The tiny person says: " + msg) + "}");
-            // Trigger immediate decision
+            // Trigger immediate response
             _nextDecisionTime = Time.time;
-            _waiting = false; // Cancel any pending request
+            _waiting = false;
+            // Enter conversation mode — she only responds to you now
+            _inConversation = true;
+            _conversationTimeout = Time.time + CONVERSATION_TIMEOUT;
             AddChatLine("You: " + msg);
         }
 
@@ -278,11 +286,31 @@ namespace SizeboxFix
                 _pendingAnim = null;
             }
 
+            // Check if conversation mode should end
+            if (_inConversation && Time.time > _conversationTimeout)
+            {
+                _inConversation = false;
+                Plugin.Log.LogInfo("[AI] Conversation timeout — back to auto mode");
+            }
+
             // Request new decision
             if (!_waiting && Time.time >= _nextDecisionTime)
             {
-                _nextDecisionTime = Time.time + _decisionInterval;
-                RequestDecision();
+                if (_inConversation)
+                {
+                    // In conversation mode — only respond if player sent a message
+                    if (!string.IsNullOrEmpty(_playerMessage))
+                    {
+                        _nextDecisionTime = Time.time + _decisionInterval;
+                        RequestDecision();
+                    }
+                }
+                else
+                {
+                    // Auto mode — act every AUTO_INTERVAL seconds
+                    _nextDecisionTime = Time.time + AUTO_INTERVAL;
+                    RequestDecision();
+                }
             }
 
             // Keep carrying player if stuffed
@@ -394,7 +422,7 @@ namespace SizeboxFix
             messages.Add("{\"role\":\"user\",\"content\":" + JsonEscape(prompt) + "}");
 
             string messagesJson = "[" + string.Join(",", messages.ToArray()) + "]";
-            string body = "{\"model\":" + JsonEscape(_model) + ",\"messages\":" + messagesJson + ",\"max_tokens\":60,\"temperature\":0.9}";
+            string body = "{\"model\":" + JsonEscape(_model) + ",\"messages\":" + messagesJson + ",\"max_tokens\":150,\"temperature\":0.9}";
 
             // Run HTTP request on background thread
             ThreadPool.QueueUserWorkItem(_ =>
@@ -424,21 +452,64 @@ namespace SizeboxFix
                 catch (WebException wex)
                 {
                     var resp = wex.Response as HttpWebResponse;
-                    if (resp != null && (int)resp.StatusCode == 429)
+                    int code = resp != null ? (int)resp.StatusCode : 0;
+
+                    // Try to read error body for details
+                    string errorBody = "";
+                    try
                     {
-                        // Rate limited — back off for 30 seconds
-                        Plugin.Log.LogWarning("[AI] Rate limited, backing off 30s");
-                        _nextDecisionTime = Time.time + 30f;
+                        if (resp != null)
+                            using (var errReader = new StreamReader(resp.GetResponseStream()))
+                                errorBody = errReader.ReadToEnd();
                     }
-                    else
+                    catch { }
+
+                    string userMsg;
+                    switch (code)
                     {
-                        Plugin.Log.LogError("[AI] API call failed: " + wex.Message);
+                        case 400:
+                            userMsg = "ERROR: Bad request — model may not exist or prompt is malformed";
+                            break;
+                        case 401:
+                            userMsg = "ERROR: Invalid API key — check your key in SizeboxAI.cfg";
+                            break;
+                        case 402:
+                            userMsg = "ERROR: Out of credits — add funds at openrouter.ai";
+                            break;
+                        case 403:
+                            userMsg = "ERROR: Access denied — your key may not have permission for this model";
+                            break;
+                        case 404:
+                            userMsg = "ERROR: Model not found — check the Model name in SizeboxAI.cfg";
+                            break;
+                        case 429:
+                            userMsg = "ERROR: Rate limited — waiting 30s before retrying";
+                            _nextDecisionTime = Time.time + 30f;
+                            break;
+                        case 500:
+                        case 502:
+                        case 503:
+                            userMsg = "ERROR: Server error — the AI provider is having issues, try again later";
+                            break;
+                        default:
+                            if (wex.Status == WebExceptionStatus.Timeout)
+                                userMsg = "ERROR: Request timed out — connection too slow or server unresponsive";
+                            else if (wex.Status == WebExceptionStatus.ConnectFailure || wex.Status == WebExceptionStatus.NameResolutionFailure)
+                                userMsg = "ERROR: Cannot connect — check your internet connection";
+                            else
+                                userMsg = "ERROR: " + wex.Message;
+                            break;
                     }
+
+                    Plugin.Log.LogWarning("[AI] " + userMsg + (code > 0 ? " (HTTP " + code + ")" : ""));
+                    AddChatLine("<color=#FF4444>" + userMsg + "</color>");
                     _waiting = false;
                 }
                 catch (Exception ex)
                 {
-                    Plugin.Log.LogError("[AI] API call failed: " + ex.Message);
+                    string userMsg = "ERROR: " + ex.Message;
+                    Plugin.Log.LogError("[AI] " + userMsg);
+                    AddChatLine("<color=#FF4444>" + userMsg + "</color>");
                     _waiting = false;
                 }
             });
@@ -561,8 +632,19 @@ namespace SizeboxFix
 
                 if (animToPlay != null)
                 {
-                    animMgr.PlayAnimation(animToPlay, false, false);
-                    Plugin.Log.LogInfo("[AI] Playing anim: " + animToPlay + " (initialized=" + animMgr.initialized + ")");
+                    // Movement actions bypass cooldown — always need walk animation
+                    bool isMovement = action == "walk_to_player" || action == "wander" || action == "walk_away";
+
+                    if (isMovement || Time.time >= _lastAnimTime + ANIM_COOLDOWN)
+                    {
+                        animMgr.PlayAnimation(animToPlay, false, false);
+                        _lastAnimTime = Time.time;
+                        Plugin.Log.LogInfo("[AI] Playing anim: " + animToPlay);
+                    }
+                    else
+                    {
+                        Plugin.Log.LogInfo("[AI] Anim cooldown, skipping: " + animToPlay);
+                    }
                 }
             }
             else
@@ -579,23 +661,21 @@ namespace SizeboxFix
             {
                 case "walk_to_player":
                     LookAtY(lookTarget);
-                    // Actually move toward the player using direct position lerping
-                    _moveCoroutine = StartCoroutine(MoveToward(playerPos, 5f));
+                    MoveGiantessTo(playerPos);
                     break;
 
                 case "wander":
-                    // Pick a random point and walk there
                     var wanderDir = UnityEngine.Random.insideUnitSphere;
                     wanderDir.y = 0;
                     var wanderTarget = _giantess.transform.position + wanderDir.normalized * _giantess.Scale * 2f;
-                    _moveCoroutine = StartCoroutine(MoveToward(wanderTarget, 4f));
+                    MoveGiantessTo(wanderTarget);
                     break;
 
                 case "walk_away":
                     var awayDir = (_giantess.transform.position - playerPos).normalized;
                     awayDir.y = 0;
                     var awayTarget = _giantess.transform.position + awayDir * _giantess.Scale * 2f;
-                    StartCoroutine(MoveToward(awayTarget, 4f));
+                    MoveGiantessTo(awayTarget);
                     break;
 
                 case "look_at_player":
@@ -653,6 +733,27 @@ namespace SizeboxFix
             _chatLogTimer = Time.time + CHAT_DISPLAY_TIME;
         }
 
+        // Use the game's built-in movement system (ArriveAction + steering behaviors)
+        void MoveGiantessTo(Vector3 target)
+        {
+            if (_giantess == null) return;
+            var humanoid = _giantess as Humanoid;
+            if (humanoid == null || humanoid.actionManager == null) return;
+
+            try
+            {
+                target.y = _giantess.transform.position.y;
+                var kinematic = new SteeringBehaviors.VectorKinematic(target);
+                var arriveAction = new ArriveAction(kinematic);
+                humanoid.actionManager.ScheduleAction(arriveAction);
+                Plugin.Log.LogInfo("[AI] Moving giantess to " + target);
+            }
+            catch (System.Exception ex)
+            {
+                Plugin.Log.LogError("[AI] MoveGiantessTo failed: " + ex.Message);
+            }
+        }
+
         // Only rotate around Y axis — prevents tilting/rotating objects weirdly
         void LookAtY(Vector3 target)
         {
@@ -666,13 +767,13 @@ namespace SizeboxFix
         IEnumerator MoveToward(Vector3 target, float duration)
         {
             if (_giantess == null) yield break;
+            var gts = _giantess as Giantess;
             target.y = _giantess.transform.position.y;
 
-            // Don't walk if target is too far — prevent teleporting across the map
+            // Don't walk if target is too far
             float maxDist = _giantess.Scale * 5f;
             if (Vector3.Distance(_giantess.transform.position, target) > maxDist)
             {
-                // Clamp target to max walk distance
                 Vector3 clampDir = (target - _giantess.transform.position).normalized;
                 target = _giantess.transform.position + clampDir * maxDist;
             }
@@ -692,9 +793,18 @@ namespace SizeboxFix
                     yield break;
 
                 dir.Normalize();
-                Vector3 newPos = _giantess.transform.position + dir * speed * Time.deltaTime;
+                Vector3 step = dir * speed * Time.deltaTime;
+                Vector3 newPos = _giantess.transform.position + step;
                 newPos.y = _giantess.transform.position.y;
-                _giantess.transform.position = newPos;
+
+                // Move mesh
+                _giantess.Move(newPos);
+
+                // Sync capsule if giantess
+                if (gts != null && gts.gtsMovement != null)
+                {
+                    gts.gtsMovement.transform.position = _giantess.transform.position;
+                }
 
                 // Face movement direction
                 if (dir.sqrMagnitude > 0.001f)
@@ -872,6 +982,7 @@ namespace SizeboxFix
     public class AIKeybindHandler : MonoBehaviour
     {
         private bool _chatOpen;
+        private bool _chatJustOpened;
         private string _chatText = "";
         private GUIStyle _boxStyle;
         private GUIStyle _textStyle;
@@ -916,6 +1027,7 @@ namespace SizeboxFix
                 if (!_chatOpen)
                 {
                     _chatOpen = true;
+                    _chatJustOpened = true;
                     _chatText = "";
                     // Disable all game input
                     if (InputManager.inputs != null)
@@ -957,8 +1069,12 @@ namespace SizeboxFix
 
         void OnGUI()
         {
-            // Always draw chat log if there are messages (even when input isn't open)
-            if (AIGiantess._chatLog.Count > 0 && Time.time < AIGiantess._chatLogTimer)
+            // Keep chat visible while input is open
+            if (_chatOpen)
+                AIGiantess._chatLogTimer = Time.time + AIGiantess.CHAT_DISPLAY_TIME;
+
+            // Draw chat panel if there are messages or input is open
+            if (AIGiantess._chatLog.Count > 0 && (Time.time < AIGiantess._chatLogTimer || _chatOpen))
             {
                 if (_chatLogStyle == null)
                 {
@@ -972,73 +1088,125 @@ namespace SizeboxFix
                     _chatLogBgStyle.normal.textColor = Color.white;
                 }
 
-                float logW = 650f;
-                float lineH = 28f;
-                float logH = AIGiantess._chatLog.Count * lineH + 10f;
-                float logX = 15f;
-                float logY = Screen.height - logH - 150f;
+                // Unified chat panel — log + input in one box
+                float panelW = Screen.width * 0.45f;
+                float lineH = 50f;
+                float inputH = 45f;
+                float panelH = AIGiantess._chatLog.Count * lineH + (_chatOpen ? inputH + 15f : 0f) + 15f;
+                float panelX = 15f;
+                float panelY = Screen.height - panelH - 30f;
 
-                // Semi-transparent background
+                // Background
                 Color old = GUI.backgroundColor;
-                GUI.backgroundColor = new Color(0, 0, 0, 0.7f);
-                GUI.Box(new Rect(logX, logY, logW, logH), "", _chatLogBgStyle);
+                GUI.backgroundColor = new Color(0, 0, 0, 0.75f);
+                GUI.Box(new Rect(panelX, panelY, panelW, panelH), "", _chatLogBgStyle);
                 GUI.backgroundColor = old;
 
+                // Chat lines
                 for (int i = 0; i < AIGiantess._chatLog.Count; i++)
                 {
                     string line = AIGiantess._chatLog[i];
-                    // Color code: "Her:" in pink, "You:" in cyan
                     if (line.StartsWith("Her:"))
                         line = "<color=#FF88CC>" + line + "</color>";
                     else if (line.StartsWith("You:"))
                         line = "<color=#88CCFF>" + line + "</color>";
 
-                    GUI.Label(new Rect(logX + 10, logY + 5 + i * lineH, logW - 20, lineH), line, _chatLogStyle);
+                    GUI.Label(new Rect(panelX + 10, panelY + 5 + i * lineH, panelW - 20, lineH), line, _chatLogStyle);
                 }
-            }
 
-            if (!_chatOpen) return;
-
-            // Handle Enter and Escape in OnGUI
-            if (Event.current.type == EventType.KeyDown)
-            {
-                if (Event.current.keyCode == KeyCode.Return || Event.current.keyCode == KeyCode.KeypadEnter)
+                // Input field at the bottom of the panel
+                if (_chatOpen)
                 {
-                    if (!string.IsNullOrEmpty(_chatText))
-                        AIGiantess.Instance.SendPlayerMessage(_chatText);
-                    CloseChat();
-                    Event.current.Use();
-                    return;
-                }
-                if (Event.current.keyCode == KeyCode.Escape)
-                {
-                    CloseChat();
-                    Event.current.Use();
-                    return;
+                    if (Event.current.type == EventType.KeyDown)
+                    {
+                        if (Event.current.keyCode == KeyCode.Return || Event.current.keyCode == KeyCode.KeypadEnter)
+                        {
+                            if (!string.IsNullOrEmpty(_chatText))
+                                AIGiantess.Instance.SendPlayerMessage(_chatText);
+                            CloseChat();
+                            Event.current.Use();
+                            return;
+                        }
+                        if (Event.current.keyCode == KeyCode.Escape)
+                        {
+                            CloseChat();
+                            Event.current.Use();
+                            return;
+                        }
+                    }
+
+                    if (_textStyle == null)
+                    {
+                        _textStyle = new GUIStyle(GUI.skin.textField);
+                        _textStyle.fontSize = 18;
+                        _textStyle.normal.textColor = Color.white;
+                        _textStyle.focused.textColor = Color.white;
+                        _textStyle.padding = new RectOffset(8, 8, 6, 6);
+                    }
+
+                    float inputY = panelY + panelH - inputH - 8f;
+                    GUI.SetNextControlName("AIChat");
+                    _chatText = GUI.TextField(new Rect(panelX + 10, inputY, panelW - 20, inputH), _chatText, 200, _textStyle);
+
+                    if (_chatJustOpened)
+                    {
+                        GUI.FocusControl("AIChat");
+                        _chatJustOpened = false;
+                    }
                 }
             }
 
-            if (_boxStyle == null)
+            // If no chat log but chat is open, still show input
+            if (_chatOpen && AIGiantess._chatLog.Count == 0)
             {
-                _boxStyle = new GUIStyle(GUI.skin.box);
-                _boxStyle.fontSize = 16;
-                _boxStyle.normal.textColor = Color.white;
-                _textStyle = new GUIStyle(GUI.skin.textField);
-                _textStyle.fontSize = 20;
-                _textStyle.normal.textColor = Color.white;
-                _textStyle.focused.textColor = Color.white;
-                _textStyle.padding = new RectOffset(8, 8, 6, 6);
+                if (_textStyle == null)
+                {
+                    _textStyle = new GUIStyle(GUI.skin.textField);
+                    _textStyle.fontSize = 18;
+                    _textStyle.normal.textColor = Color.white;
+                    _textStyle.focused.textColor = Color.white;
+                    _textStyle.padding = new RectOffset(8, 8, 6, 6);
+                }
+
+                float w = Screen.width * 0.45f;
+                float h = 45f;
+                float x = 15f;
+                float y = Screen.height - h - 40f;
+
+                Color old2 = GUI.backgroundColor;
+                GUI.backgroundColor = new Color(0, 0, 0, 0.75f);
+                if (_chatLogBgStyle == null)
+                    _chatLogBgStyle = new GUIStyle(GUI.skin.box);
+                GUI.Box(new Rect(x, y - 5, w, h + 10), "", _chatLogBgStyle);
+                GUI.backgroundColor = old2;
+
+                GUI.SetNextControlName("AIChat");
+                _chatText = GUI.TextField(new Rect(x + 10, y, w - 20, h), _chatText, 200, _textStyle);
+
+                if (_chatJustOpened)
+                {
+                    GUI.FocusControl("AIChat");
+                    _chatJustOpened = false;
+                }
+
+                if (Event.current.type == EventType.KeyDown)
+                {
+                    if (Event.current.keyCode == KeyCode.Return || Event.current.keyCode == KeyCode.KeypadEnter)
+                    {
+                        if (!string.IsNullOrEmpty(_chatText))
+                            AIGiantess.Instance.SendPlayerMessage(_chatText);
+                        CloseChat();
+                        Event.current.Use();
+                        return;
+                    }
+                    if (Event.current.keyCode == KeyCode.Escape)
+                    {
+                        CloseChat();
+                        Event.current.Use();
+                        return;
+                    }
+                }
             }
-
-            float w = 600f;
-            float h = 45f;
-            float x = (Screen.width - w) / 2f;
-            float y = Screen.height - 100f;
-
-            GUI.Box(new Rect(x - 10, y - 35, w + 20, h + 50), "Talk to her (Enter = send, Esc = cancel)", _boxStyle);
-            GUI.SetNextControlName("AIChat");
-            _chatText = GUI.TextField(new Rect(x, y, w, h), _chatText, 200, _textStyle);
-            GUI.FocusControl("AIChat");
         }
     }
 }
