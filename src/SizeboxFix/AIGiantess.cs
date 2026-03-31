@@ -51,7 +51,7 @@ namespace SizeboxFix
         private float _lastAnimTime; // When last animation was played
         private const float ANIM_COOLDOWN = 5f;
         private const float AUTO_INTERVAL = 20f;
-        private const float CONVERSATION_TIMEOUT = 30f; // Go back to auto after 30s of silence
+        private const float CONVERSATION_TIMEOUT = 60f; // Go back to auto after 60s of silence
 
         // On-screen chat log
         internal static List<string> _chatLog = new List<string>();
@@ -411,7 +411,11 @@ namespace SizeboxFix
                 "\n- When the tiny person speaks to you, you MUST directly respond to what they said." +
                 "\n- NEVER repeat the same action or dialogue twice in a row. Always vary your behavior." +
                 "\n- Your dialogue should be natural and reactive, not generic." +
-                "\n- Match your actions to the conversation — if they ask you to do something, DO IT.";
+                "\n- Match your actions to the conversation — if they ask you to do something, DO IT." +
+                "\n- Move around frequently! Use walk_to_player, wander, walk_away. Don't just stand or crouch in one spot." +
+                "\n- Do NOT use crouch_look more than once every 3-4 actions. Mix it up with movement, dancing, taunting, sitting." +
+                "\n- NEVER use stand_idle — always do something active." +
+                "\n- Only use ANIM names from the provided list. Do NOT make up animation names.";
             messages.Add("{\"role\":\"system\",\"content\":" + JsonEscape(sysPrompt) + "}");
 
             // Add conversation history (last 10 exchanges for better context)
@@ -561,13 +565,24 @@ namespace SizeboxFix
                     }
                 }
 
-                // Validate action
+                // Validate action — reject hallucinated ones
                 bool valid = false;
                 foreach (var a in ACTIONS)
                 {
                     if (a == action) { valid = true; break; }
                 }
-                if (!valid) action = "stand_idle";
+                // Map common hallucinations to valid actions
+                if (!valid)
+                {
+                    if (action.Contains("idle") || action.Contains("stand"))
+                        action = "look_at_player";
+                    else if (action.Contains("walk") || action.Contains("move") || action.Contains("approach"))
+                        action = "walk_to_player";
+                    else if (action.Contains("crouch") || action.Contains("kneel"))
+                        action = "crouch_look";
+                    else
+                        action = "look_at_player"; // Default to something active, not idle
+                }
 
                 // Store history
                 _conversationHistory.Add("{\"role\":\"assistant\",\"content\":" + JsonEscape("ACTION: " + action + "\\nSAY: " + dialogue) + "}");
