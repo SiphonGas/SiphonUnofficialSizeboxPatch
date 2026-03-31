@@ -52,7 +52,7 @@ An AI-powered giantess that acts autonomously using LLM text generation.
 - **F8** - Toggle AI on selected giantess (spawn as micro first)
 - **F9** - Open chat to talk to her
 - Uses OpenRouter API (supports any OpenAI-compatible endpoint)
-- Controls animations (2800+), facial morphs, movement, and dialogue
+- Controls default game animations (225+), facial morphs, movement, and dialogue
 - Customizable personality via config file
 - On-screen chat log with color-coded messages
 - Optional ElevenLabs text-to-speech
