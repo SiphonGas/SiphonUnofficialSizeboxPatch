@@ -74,6 +74,9 @@ An AI-powered giantess that acts autonomously using LLM text generation.
    - Download `SizeboxFix.dll` from the [Releases](../../releases) page
    - Copy it to `BepInEx/plugins/`
 
+### Updating
+When a new version is released, just download the new `SizeboxFix.dll` and replace the old one in `BepInEx/plugins/`. That's it — no other steps needed.
+
 3. **Install Lua behaviors** (optional):
    - Copy the `.lua` files from `Sizebox v3.01 - Win64 (Primary)/Sizebox_Data/StreamingAssets/lua/behaviors/` to the same path in your game folder
 
