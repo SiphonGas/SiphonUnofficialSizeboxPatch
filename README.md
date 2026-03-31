@@ -24,6 +24,12 @@ This is an **unofficial, personal project**. I am not a developer of Sizebox tho
 
 ## Features
 
+### Bone Hide/Show/Delete
+Adds buttons to the skeleton edit panel for hiding, showing, and deleting individual bone meshes. Useful for removing unwanted accessories, clothing pieces, or clipping geometry on models.
+- **Hide Bone** — Scales the bone to zero (reversible)
+- **Show Bone** — Restores hidden bones to original scale
+- **Delete Bone Mesh** — Permanently removes renderers attached to the bone
+
 ### Morph Preset Save/Load
 Save and load morph configurations per model. Buttons appear in the Morphs panel.
 - Saves to the model's character folder as `morphs.json`
