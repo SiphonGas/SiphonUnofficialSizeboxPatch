@@ -21,7 +21,7 @@ namespace SizeboxFix
         // Config
         private string _apiKey;
         private string _apiUrl = "https://openrouter.ai/api/v1/chat/completions";
-        private string _model = "cognitivecomputations/dolphin3.0-r1-mistral-24b:free";
+        private string _model = "cognitivecomputations/dolphin-mistral-24b-venice-edition:free";
         private string _personality = "";
         private float _decisionInterval = 5f;
 
@@ -117,11 +117,11 @@ namespace SizeboxFix
                 sb.AppendLine("ApiUrl=https://openrouter.ai/api/v1/chat/completions");
                 sb.AppendLine("");
                 sb.AppendLine("# Model to use on OpenRouter (uncensored options):");
-                sb.AppendLine("# cognitivecomputations/dolphin3.0-r1-mistral-24b:free  (free, uncensored, good)");
+                sb.AppendLine("# cognitivecomputations/dolphin-mistral-24b-venice-edition:free  (free, uncensored, good)");
                 sb.AppendLine("# nousresearch/hermes-3-llama-3.1-405b  (paid, very smart)");
                 sb.AppendLine("# mistralai/mistral-7b-instruct:free  (free, decent)");
                 sb.AppendLine("# For OpenAI: gpt-4o-mini  |  For local KoboldCpp: koboldcpp/model");
-                sb.AppendLine("Model=cognitivecomputations/dolphin3.0-r1-mistral-24b:free");
+                sb.AppendLine("Model=cognitivecomputations/dolphin-mistral-24b-venice-edition:free");
                 sb.AppendLine("");
                 sb.AppendLine("# Seconds between AI decisions (lower = more responsive but more API calls)");
                 sb.AppendLine("DecisionInterval=5");
