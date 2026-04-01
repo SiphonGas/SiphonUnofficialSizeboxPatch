@@ -403,6 +403,9 @@ namespace SizeboxFix
         // Store original scales for show/restore
         static System.Collections.Generic.Dictionary<Transform, Vector3> hiddenBones
             = new System.Collections.Generic.Dictionary<Transform, Vector3>();
+        // Track permanently deleted bones so Show won't restore them
+        static System.Collections.Generic.HashSet<Transform> deletedBones
+            = new System.Collections.Generic.HashSet<Transform>();
 
         static MethodBase TargetMethod()
         {
@@ -575,10 +578,10 @@ namespace SizeboxFix
             var bones = GetAllSelectedBones();
             if (bones.Count == 0)
             {
-                // Restore ALL hidden bones
+                // Restore ALL hidden bones (but skip deleted ones)
                 foreach (var kvp in hiddenBones)
                 {
-                    if (kvp.Key != null)
+                    if (kvp.Key != null && !deletedBones.Contains(kvp.Key))
                     {
                         kvp.Key.localScale = kvp.Value;
                         Debug.Log("[SizeboxFix] Restored bone: " + kvp.Key.name);
@@ -592,6 +595,13 @@ namespace SizeboxFix
             {
                 Transform t = bone.RealTransform;
                 if (t == null) continue;
+
+                // Skip deleted bones — they can't be restored
+                if (deletedBones.Contains(t))
+                {
+                    Debug.Log("[SizeboxFix] Cannot restore deleted bone: " + t.name);
+                    continue;
+                }
 
                 if (hiddenBones.ContainsKey(t))
                 {
@@ -615,33 +625,42 @@ namespace SizeboxFix
                 return;
             }
 
+            // Show confirmation dialog
+            var msg = UiMessageBox.Create(
+                "Are you sure you want to permanently delete this bone?\nThis cannot be undone (until you respawn the model).",
+                "Delete Bone");
+            msg.AddButtonsYesNo(() => { DoDeleteBones(bones); msg.Close(); });
+            msg.Popup();
+        }
+
+        static void DoDeleteBones(System.Collections.Generic.List<EditBone> bones)
+        {
             foreach (var bone in bones)
             {
                 Transform t = bone.RealTransform;
                 if (t == null) continue;
 
-                // Disable all renderers on this bone and children
+                // Destroy all renderers on this bone and children (permanent)
                 var renderers = t.GetComponentsInChildren<Renderer>(true);
                 int count = 0;
                 foreach (var r in renderers)
                 {
-                    r.enabled = false;
+                    Object.Destroy(r);
                     count++;
                 }
 
-                // Disable colliders too
+                // Destroy colliders too (permanent)
                 var colliders = t.GetComponentsInChildren<Collider>(true);
                 foreach (var c in colliders)
                 {
-                    c.enabled = false;
+                    Object.Destroy(c);
                 }
 
-                // Also scale to zero as visual confirmation
-                if (!hiddenBones.ContainsKey(t))
-                    hiddenBones[t] = t.localScale;
+                // Scale to zero and mark as deleted so Show can't restore it
                 t.localScale = Vector3.one * 0.0001f;
+                deletedBones.Add(t);
 
-                Debug.Log("[SizeboxFix] Deleted bone mesh: " + t.name + " (" + count + " renderers disabled)");
+                Debug.Log("[SizeboxFix] Permanently deleted bone: " + t.name + " (" + count + " renderers destroyed)");
             }
         }
     }
@@ -1137,13 +1156,28 @@ namespace SizeboxFix
                     return;
                 }
 
-                // Use the first button as a template for styling, parent to its container
                 Transform buttonParent = buttons[0].transform.parent;
                 Plugin.Log.LogInfo("[MorphPreset] Button parent: " + buttonParent.name);
 
-                // Clone an existing button for consistent styling
-                CreateButton(buttonParent, buttons[0].gameObject, "Save Morphs", DoSave);
-                CreateButton(buttonParent, buttons[0].gameObject, "Load Morphs", DoLoad);
+                // Shift the original button row up to make room for our row below
+                var origRect = buttonParent.GetComponent<RectTransform>();
+                var origPos = origRect.anchoredPosition;
+                origRect.anchoredPosition = new Vector2(origPos.x, origPos.y + 16f);
+
+                // Clone the button row and position it below the original
+                var row2 = Object.Instantiate(buttonParent.gameObject, buttonParent.parent);
+                row2.name = "MorphPresetButtons";
+                var row2Rect = row2.GetComponent<RectTransform>();
+                row2Rect.anchoredPosition = new Vector2(origPos.x, origPos.y - 12f);
+
+                // Remove cloned children
+                for (int i = row2.transform.childCount - 1; i >= 0; i--)
+                    Object.DestroyImmediate(row2.transform.GetChild(i).gameObject);
+
+                // Add Save/Load/Reset
+                var saveBtn = CreateButton(row2.transform, buttons[0].gameObject, "Save", DoSave);
+                var loadBtn = CreateButton(row2.transform, buttons[0].gameObject, "Load", DoLoad);
+                var resetBtn = CreateButton(row2.transform, buttons[0].gameObject, "Reset", DoReset);
 
                 Plugin.Log.LogInfo("[MorphPreset] Save/Load buttons created");
             }
@@ -1153,18 +1187,15 @@ namespace SizeboxFix
             }
         }
 
-        static void CreateButton(Transform parent, GameObject template, string label, UnityEngine.Events.UnityAction action)
+        static GameObject CreateButton(Transform parent, GameObject template, string label, UnityEngine.Events.UnityAction action)
         {
-            // Clone the existing button to inherit all styling, layout, and raycast settings
             var go = Object.Instantiate(template, parent);
             go.name = label;
 
-            // Clear existing onClick listeners from the template
             var btn = go.GetComponent<Button>();
             btn.onClick.RemoveAllListeners();
             btn.onClick.AddListener(action);
 
-            // Update the label text
             var txt = go.GetComponentInChildren<Text>();
             if (txt != null)
             {
@@ -1172,7 +1203,6 @@ namespace SizeboxFix
             }
             else
             {
-                // Fallback: add text if template didn't have one
                 var textGo = new GameObject("Text");
                 textGo.transform.SetParent(go.transform, false);
                 var newTxt = textGo.AddComponent<Text>();
@@ -1188,6 +1218,7 @@ namespace SizeboxFix
             }
 
             go.SetActive(true);
+            return go;
         }
 
         static string GetPresetPath(EntityBase entity)
@@ -1305,6 +1336,28 @@ namespace SizeboxFix
                 Plugin.Log.LogError("[MorphPreset] Load failed: " + ex);
                 new Toast("_morphPreset").Print("Load failed: " + ex.Message);
             }
+        }
+
+        static void DoReset()
+        {
+            var entity = InterfaceControl.instance != null ? InterfaceControl.instance.selectedEntity : null;
+            if (entity == null)
+            {
+                new Toast("_morphPreset").Print("Reset: no entity selected");
+                return;
+            }
+
+            var morphs = entity.Morphs;
+            if (morphs == null || morphs.Count == 0)
+            {
+                new Toast("_morphPreset").Print("Reset: no morphs on entity");
+                return;
+            }
+
+            for (int i = 0; i < morphs.Count; i++)
+                entity.SetMorphValue(i, 0f);
+
+            new Toast("_morphPreset").Print("Reset " + morphs.Count + " morphs to zero");
         }
     }
 
@@ -1653,6 +1706,15 @@ namespace SizeboxFix
 
                 loadBtn.onClick.AddListener(() => OnLoadClick(__instance));
 
+                // Expand the grid container to fit the extra button
+                var layoutRect = layout.GetComponent<RectTransform>();
+                if (layoutRect != null)
+                {
+                    var size = layoutRect.sizeDelta;
+                    var cellH = layout.cellSize.y + layout.spacing.y;
+                    layoutRect.sizeDelta = new Vector2(size.x, size.y + cellH);
+                }
+
                 Plugin.Log.LogInfo("[LoadButton] Load button added to pause menu");
             }
             catch (System.Exception ex)
@@ -1804,6 +1866,29 @@ namespace SizeboxFix
             }
         }
 
+        static void ClearAllEntities()
+        {
+            try
+            {
+                // Destroy all existing entities so loading starts fresh
+                var allEntities = Object.FindObjectsOfType<EntityBase>();
+                int count = 0;
+                foreach (var entity in allEntities)
+                {
+                    if (entity != null && entity.gameObject != null)
+                    {
+                        entity.DestroyObject();
+                        count++;
+                    }
+                }
+                Plugin.Log.LogInfo("[LoadButton] Cleared " + count + " entities");
+            }
+            catch (System.Exception ex)
+            {
+                Plugin.Log.LogError("[LoadButton] ClearAllEntities failed: " + ex.Message);
+            }
+        }
+
         static void LoadSavedFile(string filename, GameObject panel)
         {
             try
@@ -1834,16 +1919,19 @@ namespace SizeboxFix
                 if (GameController.Instance != null)
                     GameController.Instance.SetPausedState(false);
 
+                // Clear ALL existing entities before loading
+                ClearAllEntities();
+
                 if (!string.IsNullOrEmpty(savedScene) && savedScene != currentScene)
                 {
-                    // Different scene — load the scene first, then ReBuildScene happens
-                    // via the SceneLoaded callback since data is cached by LoadFile
+                    // Different scene — load the scene (which also clears everything)
+                    // then ReBuildScene runs after scene load via the cached data
                     Plugin.Log.LogInfo("[LoadButton] Switching scene: " + currentScene + " -> " + savedScene);
                     SavedScenesManager.Instance.LoadScene(savedScene);
                 }
                 else
                 {
-                    // Same scene — just rebuild entities
+                    // Same scene — rebuild entities (already cleared above)
                     SavedScenesManager.Instance.ReBuildScene();
                 }
 
@@ -1933,6 +2021,82 @@ namespace SizeboxFix
             {
                 Plugin.Log.LogError("[Fix15] Preset scroll fix failed: " + ex.Message);
             }
+        }
+    }
+
+    // === Fix 16: ObjectManager memory leak ===
+    // _OnObjectRemoved() has a copy-paste bug — it ADDS the entity back to the dictionary
+    // and fires OnObjectAdd instead of removing. Same bug in _OnMicroRemoved().
+    // This causes every destroyed micro and object to leak in memory forever,
+    // making the game progressively slower during long sessions.
+    [HarmonyPatch(typeof(ObjectManager), "_OnObjectRemoved")]
+    static class ObjectManagerRemoveFix
+    {
+        static bool Prefix(ObjectManager __instance, EntityBase entity)
+        {
+            // Do the correct thing: REMOVE from dictionary
+            __instance.ObjectDictionary.Remove(entity.id);
+            return false; // Skip the broken original
+        }
+    }
+
+    [HarmonyPatch(typeof(ObjectManager), "_OnMicroRemoved")]
+    static class MicroManagerRemoveFix
+    {
+        static bool Prefix(Micro micro)
+        {
+            // The original fires OnMicroAdd instead of OnMicroRemove.
+            // We skip it — the entity is already unregistered from _entityDictionary
+            // by UnregisterEntity before this is called. The MicroManager handles
+            // its own dictionary separately.
+            return false; // Skip the broken original
+        }
+    }
+
+    // === Fix 17: EventManager dead listener leak ===
+    // Null listeners are logged but never removed, accumulating forever.
+    // This patches SendEvent to clean up dead listeners.
+    [HarmonyPatch(typeof(EventManager), "SendEvent")]
+    static class EventManagerCleanupFix
+    {
+        static bool Prefix(IEvent e)
+        {
+            var listenersField = AccessTools.Field(typeof(EventManager), "listeners");
+            if (listenersField == null) return true;
+
+            var listeners = listenersField.GetValue(null) as System.Collections.IList;
+            if (listeners == null) return true;
+
+            // Iterate backwards so we can safely remove
+            for (int i = listeners.Count - 1; i >= 0; i--)
+            {
+                var listener = listeners[i];
+                if (listener == null)
+                {
+                    listeners.RemoveAt(i);
+                    continue;
+                }
+
+                // Access the listener's fields via reflection
+                var listenerField = AccessTools.Field(listener.GetType(), "listener");
+                var codeField = AccessTools.Field(listener.GetType(), "interestCode");
+                if (listenerField == null || codeField == null) continue;
+
+                var actualListener = listenerField.GetValue(listener) as IListener;
+                if (actualListener == null)
+                {
+                    listeners.RemoveAt(i);
+                    continue;
+                }
+
+                var code = codeField.GetValue(listener);
+                if (code != null && code.Equals(e.code))
+                {
+                    actualListener.OnNotify(e);
+                }
+            }
+
+            return false; // Skip original
         }
     }
 }
