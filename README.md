@@ -21,6 +21,9 @@ This is an **unofficial, personal project**. I am not a developer of Sizebox tho
 - **Handle Gizmo Sync** - Syncs handle target to currently selected entity.
 - **ChangeScale Position Fix** - Prevents floating point position drift during SetParent operations.
 - **Blink Morph Fix** - Prevents blink coroutine from overwriting user-set morph values.
+- **ObjectManager Memory Leak Fix** - The game's `_OnObjectRemoved()` had a copy-paste bug that re-added destroyed entities to the dictionary instead of removing them. Every destroyed micro and object leaked in memory forever, causing progressive slowdown during long sessions. Now properly cleans up.
+- **EventManager Dead Listener Cleanup** - Null event listeners were logged but never removed, accumulating forever. Now cleaned up automatically during event dispatch.
+- **Scene Loader Entity Clear** - Loading a save from the pause menu now clears all existing entities first, preventing duplicates and ghost objects.
 
 ## Features
 
