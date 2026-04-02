@@ -91,7 +91,19 @@ namespace SizeboxFix
 
                 if ((capsulePos - meshPos).sqrMagnitude > 0.0001f)
                 {
-                    gts._MoveMesh(capsulePos);
+                    // Snap X/Z immediately (prevents horizontal drift)
+                    // But clamp upward Y movement to prevent floating over buildings
+                    Vector3 targetPos = capsulePos;
+                    float yDiff = capsulePos.y - meshPos.y;
+                    if (yDiff > 0)
+                    {
+                        // Going up — limit to small step per frame (prevents riding over buildings)
+                        float maxYStep = gts.Height * 0.05f * Time.deltaTime * 10f;
+                        targetPos.y = meshPos.y + Mathf.Min(yDiff, maxYStep);
+                    }
+                    // Going down snaps immediately (gravity works normally)
+
+                    gts._MoveMesh(targetPos);
                 }
 
                 float deltaTime = Time.deltaTime;
