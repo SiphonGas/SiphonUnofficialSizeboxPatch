@@ -68,7 +68,8 @@ namespace SizeboxFix
             // DoNotMove must be checked first — user wants to noclip/freely place
             if (moveState == GTSMovement.MacroMoveState.DoNotMove)
             {
-                // Do nothing — let user freely position the mesh
+                // Skip movement but still sync rotation so rotation handle works
+                capsuleT.rotation = gts.transform.rotation;
             }
             else if (moveState == GTSMovement.MacroMoveState.ResetTransformPosition)
             {
