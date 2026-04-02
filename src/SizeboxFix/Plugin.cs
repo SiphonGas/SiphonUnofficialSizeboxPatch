@@ -91,17 +91,26 @@ namespace SizeboxFix
 
                 if ((capsulePos - meshPos).sqrMagnitude > 0.0001f)
                 {
-                    // Snap X/Z immediately (prevents horizontal drift)
-                    // But clamp upward Y movement to prevent floating over buildings
                     Vector3 targetPos = capsulePos;
-                    float yDiff = capsulePos.y - meshPos.y;
-                    if (yDiff > 0)
+
+                    // Raycast down from capsule to find actual ground level
+                    // This prevents the mesh from floating when the capsule
+                    // rides over building colliders
+                    RaycastHit hit;
+                    float rayStart = gts.Height * 2f;
+                    Vector3 rayOrigin = new Vector3(capsulePos.x, capsulePos.y + rayStart, capsulePos.z);
+                    if (Physics.Raycast(rayOrigin, Vector3.down, out hit, rayStart * 2f, Layers.gtsWalkableMask))
                     {
-                        // Going up — limit to small step per frame (prevents riding over buildings)
-                        float maxYStep = gts.Height * 0.05f * Time.deltaTime * 10f;
-                        targetPos.y = meshPos.y + Mathf.Min(yDiff, maxYStep);
+                        // Use ground Y, not capsule Y
+                        targetPos.y = hit.point.y;
                     }
-                    // Going down snaps immediately (gravity works normally)
+                    else
+                    {
+                        // No terrain hit — fall back to clamped Y
+                        float yDiff = capsulePos.y - meshPos.y;
+                        if (yDiff > gts.Height * 0.1f)
+                            targetPos.y = meshPos.y;
+                    }
 
                     gts._MoveMesh(targetPos);
                 }
