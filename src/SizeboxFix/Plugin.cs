@@ -950,8 +950,11 @@ namespace SizeboxFix
 
             if (rb != null)
             {
-                rb.MovePosition(rb.position + delta);
-                // Skip: rb.MoveRotation(deltaRotation * rb.rotation)
+                // Skip root motion position when DoNotMove is active
+                var gts = entity as Giantess;
+                bool doNotMove = gts != null && gts.gtsMovement != null && gts.gtsMovement.doNotMoveGts;
+                if (!doNotMove)
+                    rb.MovePosition(rb.position + delta);
             }
 
             // Reset accumulators
@@ -987,57 +990,102 @@ namespace SizeboxFix
         }
     }
 
-    // === Fix 9: Blink routine morph corruption ===
-    // The blink coroutine can stack up and overwrite user morph changes.
-    // Fix: prevent multiple blink coroutines from running, and don't
-    // restore stale morph values after a blink.
+    // === Fix 9: Blink morph selection + routine corruption ===
+
+    // Fix 9-pre: Override blink morph selection.
+    // The game hardcodes FindMorphByNameContains("笑い") which finds the
+    // smile morph on models that have both "Blink" and "笑い" morphs.
+    // Prefer dedicated blink morphs first, fall back to 笑い for MMD models.
+    [HarmonyPatch(typeof(Humanoid), "InitializeMorphs")]
+    static class BlinkMorphSelectionFix
+    {
+        static void Postfix(Humanoid __instance)
+        {
+            // Check if there's a dedicated "Blink" morph
+            var morphs = __instance.Morphs;
+            if (morphs == null) return;
+
+            EntityMorphData blinkMorph = null;
+            EntityMorphData currentBlink = Traverse.Create(__instance).Field("_blinkingMorph").GetValue<EntityMorphData>();
+
+            // Look for exact "Blink" morph first (case-insensitive)
+            foreach (var m in morphs)
+            {
+                if (m.Name.Equals("Blink", System.StringComparison.OrdinalIgnoreCase) ||
+                    m.Name.Equals("blink", System.StringComparison.OrdinalIgnoreCase) ||
+                    m.Name.Equals("まばたき", System.StringComparison.Ordinal))
+                {
+                    blinkMorph = m;
+                    break;
+                }
+            }
+
+            // If we found a better blink morph, override the game's choice
+            if (blinkMorph != null && blinkMorph != currentBlink)
+            {
+                Traverse.Create(__instance).Field("_blinkingMorph").SetValue(blinkMorph);
+                Plugin.Log.LogInfo("[Blink] Overrode blink morph: '" + currentBlink?.Name + "' -> '" + blinkMorph.Name + "'");
+            }
+        }
+    }
+
+    // Fix 9a: Prevent duplicate blink coroutines from stacking.
     [HarmonyPatch(typeof(Humanoid), "StartBlinkingRoutine")]
     static class BlinkRoutineFix
     {
-        static System.Collections.Generic.Dictionary<Humanoid, Coroutine> activeBlinkRoutines
-            = new System.Collections.Generic.Dictionary<Humanoid, Coroutine>();
+        static System.Collections.Generic.HashSet<int> _blinkingEntities
+            = new System.Collections.Generic.HashSet<int>();
 
         static bool Prefix(Humanoid __instance)
         {
-            // Stop any existing blink coroutine before starting a new one
-            if (activeBlinkRoutines.ContainsKey(__instance))
-            {
-                var existing = activeBlinkRoutines[__instance];
-                if (existing != null)
-                    __instance.StopCoroutine(existing);
-                activeBlinkRoutines.Remove(__instance);
-            }
-            return true;
-        }
+            int id = __instance.GetInstanceID();
 
-        static void Postfix(Humanoid __instance)
-        {
-            // Track that this humanoid has an active blink routine
-            // We can't get the coroutine reference easily, so just mark it
-            activeBlinkRoutines[__instance] = null;
+            // If already blinking, skip starting another coroutine
+            if (_blinkingEntities.Contains(id))
+            {
+                return false; // Block duplicate blink coroutine
+            }
+
+            _blinkingEntities.Add(id);
+            return true;
         }
     }
 
     // Prevent blink from overwriting user-set morph values
-    // When user changes a morph via SetMorphValue(int/string), record it
-    // so the blink restore doesn't clobber it
+    // Patch BOTH SetMorphValue overloads (int and string) so the blink
+    // restore always uses the user's intended value.
     [HarmonyPatch(typeof(EntityBase), "SetMorphValue", new[] { typeof(int), typeof(float) })]
     static class MorphUserChangeFix
     {
         static void Prefix(EntityBase __instance, int i, float weight)
         {
-            // If this is being called from user action (not blink),
-            // update the blink's stored user state so it restores correctly
             var humanoid = __instance as Humanoid;
             if (humanoid == null) return;
 
             var blinkMorph = Traverse.Create(humanoid).Field("_blinkingMorph").GetValue<EntityMorphData>();
             if (blinkMorph == null) return;
 
-            // Check if the morph being set is the blink morph
             if (i < __instance.Morphs.Count && __instance.Morphs[i] == blinkMorph)
             {
-                // Update the stored user state so blink restores to this value
+                Traverse.Create(humanoid).Field("_blinkMorphUserState").SetValue(weight);
+            }
+        }
+    }
+
+    // Also catch string-based morph changes (from sliders, AI, load presets)
+    [HarmonyPatch(typeof(EntityBase), "SetMorphValue", new[] { typeof(string), typeof(float) })]
+    static class MorphUserChangeStringFix
+    {
+        static void Prefix(EntityBase __instance, string morphName, float weight)
+        {
+            var humanoid = __instance as Humanoid;
+            if (humanoid == null) return;
+
+            var blinkMorph = Traverse.Create(humanoid).Field("_blinkingMorph").GetValue<EntityMorphData>();
+            if (blinkMorph == null) return;
+
+            if (blinkMorph.Name == morphName)
+            {
                 Traverse.Create(humanoid).Field("_blinkMorphUserState").SetValue(weight);
             }
         }
@@ -1987,31 +2035,26 @@ namespace SizeboxFix
                 if (guiMgr != null)
                     guiMgr.ClosePauseMenu();
 
-                // Clear existing entities safely
-                ClearAllEntities();
-
-                if (!string.IsNullOrEmpty(savedScene) && savedScene != currentScene)
-                {
-                    // Different scene — load scene and rebuild after it finishes
+                // Always reload the scene (even same scene) so Unity properly
+                // destroys old entities before we spawn new ones. Direct
+                // ClearAllEntities + ReBuildScene causes crashes because
+                // DestroyObject is deferred and old entities still exist
+                // when SpawnEntities runs.
+                string targetScene = !string.IsNullOrEmpty(savedScene) ? savedScene : currentScene;
+                if (savedScene != currentScene)
                     Plugin.Log.LogInfo("[LoadButton] Switching scene: " + currentScene + " -> " + savedScene);
-
-                    // Register a one-shot callback to rebuild after scene loads
-                    UnityEngine.Events.UnityAction<UnityEngine.SceneManagement.Scene, UnityEngine.SceneManagement.LoadSceneMode> callback = null;
-                    callback = (scene, mode) =>
-                    {
-                        UnityEngine.SceneManagement.SceneManager.sceneLoaded -= callback;
-                        // Wait a frame for GameController to initialize
-                        GameController.Instance.StartCoroutine(RebuildAfterDelay());
-                    };
-                    UnityEngine.SceneManagement.SceneManager.sceneLoaded += callback;
-
-                    SavedScenesManager.Instance.LoadScene(savedScene);
-                }
                 else
+                    Plugin.Log.LogInfo("[LoadButton] Reloading scene: " + currentScene);
+
+                UnityEngine.Events.UnityAction<UnityEngine.SceneManagement.Scene, UnityEngine.SceneManagement.LoadSceneMode> callback = null;
+                callback = (scene, mode) =>
                 {
-                    // Same scene — rebuild entities directly
-                    SavedScenesManager.Instance.ReBuildScene();
-                }
+                    UnityEngine.SceneManagement.SceneManager.sceneLoaded -= callback;
+                    GameController.Instance.StartCoroutine(RebuildAfterDelay());
+                };
+                UnityEngine.SceneManagement.SceneManager.sceneLoaded += callback;
+
+                SavedScenesManager.Instance.LoadScene(targetScene);
 
                 new Toast("_loadMenu").Print("Loaded: " + filename.Replace(".json", ""));
                 Plugin.Log.LogInfo("[LoadButton] Loaded scene: " + filename);
