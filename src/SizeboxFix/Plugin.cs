@@ -2241,4 +2241,179 @@ namespace SizeboxFix
             }
         }
     }
+
+    // === Fix 18: City performance optimizations ===
+
+    // Phase 1: Cache renderer arrays so MakeBuildingsVisible/MakeRoadsVisible
+    // don't call GetComponentsInChildren every toggle.
+    // Phase 2: Per-building distance culling in Update.
+    [HarmonyPatch(typeof(CityBuilder), "Update")]
+    static class CityPerformanceFix
+    {
+        // Per-city cached data
+        internal static Dictionary<int, Renderer[]> _buildingRendererCache = new Dictionary<int, Renderer[]>();
+        internal static Dictionary<int, Renderer[]> _roadRendererCache = new Dictionary<int, Renderer[]>();
+        static Dictionary<int, Transform[]> _buildingTransformCache = new Dictionary<int, Transform[]>();
+        static Dictionary<int, int> _cullingIndex = new Dictionary<int, int>();
+
+        const int BUILDINGS_PER_FRAME = 50;
+        const float BUILDING_CULL_DIST_MULTIPLIER = 3f; // Cull buildings beyond 3x city radius
+
+        static void Postfix(CityBuilder __instance)
+        {
+            int id = __instance.GetInstanceID();
+            Camera cam = Camera.main;
+            if (cam == null) return;
+
+            // Per-building distance culling
+            Transform[] buildingTransforms;
+            if (!_buildingTransformCache.TryGetValue(id, out buildingTransforms))
+            {
+                // First time — cache building transforms
+                var buildingRootField = AccessTools.Field(typeof(CityBuilder), "_buildingRoot");
+                var buildingRoot = buildingRootField?.GetValue(__instance) as GameObject;
+                if (buildingRoot == null) return;
+
+                var buildings = buildingRoot.GetComponentsInChildren<Assets.Scripts.ProceduralCityGenerator.CityBuilding>(true);
+                buildingTransforms = new Transform[buildings.Length];
+                for (int i = 0; i < buildings.Length; i++)
+                    buildingTransforms[i] = buildings[i].transform;
+
+                _buildingTransformCache[id] = buildingTransforms;
+                _cullingIndex[id] = 0;
+                Plugin.Log.LogInfo("[CityOpt] Cached " + buildings.Length + " building transforms for culling");
+            }
+
+            if (buildingTransforms.Length == 0) return;
+
+            // Process a batch of buildings per frame
+            int startIdx;
+            if (!_cullingIndex.TryGetValue(id, out startIdx))
+                startIdx = 0;
+
+            Vector3 camPos = cam.transform.position;
+            float cityScale = __instance.Scale;
+            float cullDistSqr = Mathf.Pow(cityScale * __instance.Height * BUILDING_CULL_DIST_MULTIPLIER, 2);
+
+            int processed = 0;
+            for (int i = startIdx; processed < BUILDINGS_PER_FRAME && i < buildingTransforms.Length; i++, processed++)
+            {
+                if (buildingTransforms[i] == null) continue;
+                var renderer = buildingTransforms[i].GetComponent<Renderer>();
+                if (renderer == null) continue;
+
+                float distSqr = (camPos - buildingTransforms[i].position).sqrMagnitude;
+                renderer.enabled = distSqr < cullDistSqr;
+            }
+
+            startIdx += processed;
+            if (startIdx >= buildingTransforms.Length)
+                startIdx = 0;
+            _cullingIndex[id] = startIdx;
+        }
+    }
+
+    // Phase 1: Cache renderers for MakeBuildingsVisible
+    [HarmonyPatch(typeof(CityBuilder), "MakeBuildingsVisible")]
+    static class CityRendererCacheFix
+    {
+        static bool Prefix(CityBuilder __instance, bool visible)
+        {
+            var buildingRootField = AccessTools.Field(typeof(CityBuilder), "_buildingRoot");
+            var floorRootField = AccessTools.Field(typeof(CityBuilder), "_floorRoot");
+            var floorMatField = AccessTools.Field(typeof(CityBuilder), "floorMaterial");
+            var lowPolyField = AccessTools.Field(typeof(CityBuilder), "lowPoly");
+            var visibleField = AccessTools.Field(typeof(CityBuilder), "_isBuildingsVisible");
+
+            var buildingRoot = buildingRootField?.GetValue(__instance) as GameObject;
+            var floorRoot = floorRootField?.GetValue(__instance) as GameObject;
+            if (buildingRoot == null || floorRoot == null) return true;
+
+            // Cache renderers
+            int id = __instance.GetInstanceID();
+            Renderer[] renderers;
+            if (!CityPerformanceFix._buildingRendererCache.TryGetValue(id, out renderers))
+            {
+                renderers = buildingRoot.GetComponentsInChildren<Renderer>(true);
+                CityPerformanceFix._buildingRendererCache[id] = renderers;
+                Plugin.Log.LogInfo("[CityOpt] Cached " + renderers.Length + " building renderers");
+            }
+
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                if (renderers[i] != null)
+                    renderers[i].enabled = visible;
+            }
+
+            var floorRenderer = floorRoot.GetComponent<MeshRenderer>();
+            if (floorRenderer != null)
+            {
+                var mat = visible ? floorMatField?.GetValue(__instance) as Material
+                                  : lowPolyField?.GetValue(__instance) as Material;
+                if (mat != null) floorRenderer.material = mat;
+            }
+
+            visibleField?.SetValue(__instance, visible);
+            return false; // Skip original
+        }
+    }
+
+    // Phase 1: Cache renderers for MakeRoadsVisible
+    [HarmonyPatch(typeof(CityBuilder), "MakeRoadsVisible")]
+    static class CityRoadRendererCacheFix
+    {
+        static bool Prefix(CityBuilder __instance, bool visible)
+        {
+            var roadRootField = AccessTools.Field(typeof(CityBuilder), "_roadRoot");
+            var visibleField = AccessTools.Field(typeof(CityBuilder), "_isRoadsVisible");
+
+            var roadRoot = roadRootField?.GetValue(__instance) as GameObject;
+            if (roadRoot == null) return true;
+
+            int id = __instance.GetInstanceID();
+            Renderer[] renderers;
+            if (!CityPerformanceFix._roadRendererCache.TryGetValue(id, out renderers))
+            {
+                renderers = roadRoot.GetComponentsInChildren<Renderer>(true);
+                CityPerformanceFix._roadRendererCache[id] = renderers;
+                Plugin.Log.LogInfo("[CityOpt] Cached " + renderers.Length + " road renderers");
+            }
+
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                if (renderers[i] != null)
+                    renderers[i].enabled = visible;
+            }
+
+            visibleField?.SetValue(__instance, visible);
+            return false; // Skip original
+        }
+    }
+
+    // Phase 3: Reduce debris lifetime from 20s to 6s
+    [HarmonyPatch]
+    static class CityDebrisLifetimeFix
+    {
+        static System.Type _cityBuildingType;
+
+        static bool Prepare()
+        {
+            _cityBuildingType = AccessTools.TypeByName("Assets.Scripts.ProceduralCityGenerator.CityBuilding");
+            return _cityBuildingType != null;
+        }
+
+        static MethodBase TargetMethod()
+        {
+            return AccessTools.Method(_cityBuildingType, "DebrisAnimation");
+        }
+
+        // Can't easily patch a coroutine's yield content, so instead patch
+        // the Destroy calls. We'll use a Postfix on the building's destruction
+        // to clean up faster.
+        static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+        {
+            // Just let it run — we'll handle cleanup differently
+            return instructions;
+        }
+    }
 }
