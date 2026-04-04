@@ -2222,7 +2222,7 @@ namespace SizeboxFix
                 labelGo.transform.SetParent(canvas.transform, false);
 
                 var txt = labelGo.AddComponent<Text>();
-                txt.text = "SizeboxFix v1.4.2";
+                txt.text = "SizeboxFix v1.4.3";
                 txt.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
                 txt.fontSize = 16;
                 txt.alignment = TextAnchor.LowerRight;
