@@ -1397,7 +1397,10 @@ namespace SizeboxFix
             translations = new System.Collections.Generic.Dictionary<string, string>
             {
                 // Eyes
-                {"まばたき", "Blink"}, {"笑い", "Smile/Laugh"}, {"ウィンク", "Wink"},
+                {"まばたき", "Blink"}, {"ウィンク", "Wink"},
+                // NOTE: "笑い" intentionally NOT translated — the blink system uses
+                // FindMorphByNameContains("笑い") to find the blink morph. Translating
+                // it breaks blinking on MMD models.
                 {"ウィンク右", "Wink Right"}, {"ウィンク２", "Wink2"}, {"ウィンク2", "Wink2"},
                 {"ウィンク2右", "Wink2 Right"}, {"ウインク2右", "Wink2 Right"},
                 {"ウインク", "Wink"}, {"ウインク右", "Wink Right"},
