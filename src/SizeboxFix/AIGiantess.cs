@@ -129,11 +129,16 @@ namespace SizeboxFix
                 sb.AppendLine("# Personality prompt - describe how the giantess should behave");
                 sb.AppendLine("Personality=You are a submissive giantess who serves your tiny master. You are eager to please, obedient, and devoted. You crawl when approaching your master. You love being told what to do. You call the tiny person Master. You are flirty and seductive, always trying to impress.");
                 sb.AppendLine("");
-                sb.AppendLine("# ElevenLabs Text-to-Speech");
-                sb.AppendLine("# Get key from elevenlabs.io -> Developers");
+                sb.AppendLine("# Text-to-Speech");
+                sb.AppendLine("# Provider: edge (free, no key needed) or elevenlabs (needs key)");
+                sb.AppendLine("TTSProvider=edge");
+                sb.AppendLine("TTSEnabled=true");
+                sb.AppendLine("# Edge TTS voice (free, requires python3 + pip install edge-tts)");
+                sb.AppendLine("# Voices: en-US-AriaNeural, en-US-JennyNeural, en-US-AvaNeural, en-US-EmmaNeural");
+                sb.AppendLine("TTSEdgeVoice=en-US-AriaNeural");
+                sb.AppendLine("# ElevenLabs (optional, needs API key from elevenlabs.io)");
                 sb.AppendLine("TTSApiKey=");
                 sb.AppendLine("TTSVoiceId=eVItLK1UvXctxuaRV2Oq");
-                sb.AppendLine("TTSEnabled=true");
                 File.WriteAllText(configPath, sb.ToString());
 
                 Plugin.Log.LogWarning("[AI] Created config at " + configPath + " — paste your API key there!");
@@ -160,6 +165,8 @@ namespace SizeboxFix
                     case "TTSApiKey": _ttsApiKey = val; break;
                     case "TTSVoiceId": _ttsVoiceId = val; break;
                     case "TTSEnabled": _ttsEnabled = val.ToLower() == "true"; break;
+                    case "TTSProvider": _ttsProvider = val.ToLower(); break;
+                    case "TTSEdgeVoice": _ttsEdgeVoice = val; break;
                 }
             }
 
@@ -246,6 +253,16 @@ namespace SizeboxFix
             _giantess = null;
             _player = null;
             new Toast("_ai").Print("AI Giantess deactivated");
+        }
+
+        /// <summary>
+        /// Make the giantess say something with TTS (called from F10 manual input)
+        /// </summary>
+        public void SpeakManual(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return;
+            AddChatLine("Her: " + text);
+            SpeakTTS(text);
         }
 
         public void SendPlayerMessage(string msg)
@@ -893,11 +910,65 @@ namespace SizeboxFix
         }
 
         private int _ttsFailCount;
+        private string _ttsProvider = "edge"; // "edge" or "elevenlabs"
+        private string _ttsEdgeVoice = "en-US-AriaNeural";
 
         void SpeakTTS(string text)
         {
-            if (!_ttsEnabled || string.IsNullOrEmpty(_ttsApiKey) || string.IsNullOrEmpty(text)) return;
-            if (_ttsFailCount >= 3) return; // Stop trying after 3 failures
+            if (!_ttsEnabled || string.IsNullOrEmpty(text)) return;
+            if (_ttsFailCount >= 5) return;
+
+            if (_ttsProvider == "edge")
+                SpeakEdgeTTS(text);
+            else
+                SpeakElevenLabsTTS(text);
+        }
+
+        void SpeakEdgeTTS(string text)
+        {
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    string tempPath = Path.Combine(Application.temporaryCachePath, "ai_tts.mp3");
+                    // Escape quotes in text for command line
+                    string safeText = text.Replace("\"", "'").Replace("\n", " ");
+
+                    var psi = new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = "python3",
+                        Arguments = "-m edge_tts --voice " + _ttsEdgeVoice + " --text \"" + safeText + "\" --write-media \"" + tempPath + "\"",
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true
+                    };
+
+                    var proc = System.Diagnostics.Process.Start(psi);
+                    proc.WaitForExit(10000);
+
+                    if (proc.ExitCode == 0 && File.Exists(tempPath))
+                    {
+                        _pendingAudioPath = tempPath;
+                    }
+                    else
+                    {
+                        string err = proc.StandardError.ReadToEnd();
+                        Plugin.Log.LogError("[AI-TTS] Edge TTS failed: " + err);
+                        _ttsFailCount++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _ttsFailCount++;
+                    Plugin.Log.LogError("[AI-TTS] Edge TTS error: " + ex.Message);
+                }
+            });
+        }
+
+        void SpeakElevenLabsTTS(string text)
+        {
+            if (string.IsNullOrEmpty(_ttsApiKey)) return;
 
             ThreadPool.QueueUserWorkItem(_ =>
             {
@@ -919,24 +990,18 @@ namespace SizeboxFix
                     using (var response = (HttpWebResponse)request.GetResponse())
                     using (var audioStream = response.GetResponseStream())
                     {
-                        // Save to temp file
                         string tempPath = Path.Combine(Application.temporaryCachePath, "ai_tts.mp3");
                         using (var fs = new FileStream(tempPath, FileMode.Create))
                         {
                             audioStream.CopyTo(fs);
                         }
-
-                        // Convert MP3 to WAV using a simple approach — load via Unity on main thread
                         _pendingAudioPath = tempPath;
                     }
                 }
                 catch (Exception ex)
                 {
                     _ttsFailCount++;
-                    if (_ttsFailCount >= 3)
-                        Plugin.Log.LogWarning("[AI-TTS] Disabled after 3 failures: " + ex.Message);
-                    else
-                        Plugin.Log.LogError("[AI-TTS] Failed: " + ex.Message);
+                    Plugin.Log.LogError("[AI-TTS] ElevenLabs failed: " + ex.Message);
                 }
             });
         }
@@ -964,14 +1029,37 @@ namespace SizeboxFix
                     AudioClip clip = www.GetAudioClip(false, false, AudioType.MPEG);
                     if (clip != null)
                     {
-                        // Ensure we have an audio source
-                        if (_ttsAudioSource == null)
+                        // Attach audio source to the giantess so sound comes from her
+                        if (_ttsAudioSource == null || _ttsAudioSource.gameObject == null)
                         {
-                            var go = new GameObject("AI_TTS_Audio");
-                            UnityEngine.Object.DontDestroyOnLoad(go);
-                            _ttsAudioSource = go.AddComponent<AudioSource>();
-                            _ttsAudioSource.spatialBlend = 0f; // 2D audio
+                            GameObject audioGo;
+                            if (_giantess != null)
+                            {
+                                audioGo = _giantess.gameObject;
+                            }
+                            else
+                            {
+                                audioGo = new GameObject("AI_TTS_Audio");
+                                UnityEngine.Object.DontDestroyOnLoad(audioGo);
+                            }
+
+                            _ttsAudioSource = audioGo.GetComponent<AudioSource>();
+                            if (_ttsAudioSource == null)
+                                _ttsAudioSource = audioGo.AddComponent<AudioSource>();
+
+                            _ttsAudioSource.spatialBlend = 1f; // 3D audio — comes from giantess
                             _ttsAudioSource.volume = 1f;
+                            _ttsAudioSource.minDistance = 5f;
+                            _ttsAudioSource.maxDistance = 500f;
+                            _ttsAudioSource.rolloffMode = AudioRolloffMode.Linear;
+                        }
+
+                        // Update distance based on giantess scale
+                        if (_giantess != null)
+                        {
+                            float scale = _giantess.Scale;
+                            _ttsAudioSource.minDistance = 200f * scale;
+                            _ttsAudioSource.maxDistance = 10000f * scale;
                         }
 
                         _ttsAudioSource.clip = clip;
@@ -998,6 +1086,7 @@ namespace SizeboxFix
     {
         private bool _chatOpen;
         private bool _chatJustOpened;
+        private bool _ttsInputMode; // true = F10 TTS mode, false = F9 chat mode
         private string _chatText = "";
         private GUIStyle _boxStyle;
         private GUIStyle _textStyle;
@@ -1043,8 +1132,8 @@ namespace SizeboxFix
                 {
                     _chatOpen = true;
                     _chatJustOpened = true;
+                    _ttsInputMode = false; // F9 = chat mode
                     _chatText = "";
-                    // Disable all game input
                     if (InputManager.inputs != null)
                         InputManager.inputs.Disable();
                 }
@@ -1054,13 +1143,36 @@ namespace SizeboxFix
                 }
             }
 
-            // Also handle Enter/Escape in Update as backup
+            // F10 toggles TTS input — type what you want her to say
+            if (Input.GetKeyDown(KeyCode.F10) && AIGiantess.Instance != null && AIGiantess.Instance.IsActive)
+            {
+                if (!_chatOpen)
+                {
+                    _chatOpen = true;
+                    _chatJustOpened = true;
+                    _ttsInputMode = true;
+                    _chatText = "";
+                    if (InputManager.inputs != null)
+                        InputManager.inputs.Disable();
+                }
+                else
+                {
+                    CloseChat();
+                }
+            }
+
+            // Handle Enter/Escape in Update as backup
             if (_chatOpen)
             {
                 if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))
                 {
                     if (!string.IsNullOrEmpty(_chatText))
-                        AIGiantess.Instance.SendPlayerMessage(_chatText);
+                    {
+                        if (_ttsInputMode)
+                            AIGiantess.Instance.SpeakManual(_chatText);
+                        else
+                            AIGiantess.Instance.SendPlayerMessage(_chatText);
+                    }
                     CloseChat();
                 }
                 if (Input.GetKeyDown(KeyCode.Escape))
@@ -1137,7 +1249,12 @@ namespace SizeboxFix
                         if (Event.current.keyCode == KeyCode.Return || Event.current.keyCode == KeyCode.KeypadEnter)
                         {
                             if (!string.IsNullOrEmpty(_chatText))
-                                AIGiantess.Instance.SendPlayerMessage(_chatText);
+                            {
+                                if (_ttsInputMode)
+                                    AIGiantess.Instance.SpeakManual(_chatText);
+                                else
+                                    AIGiantess.Instance.SendPlayerMessage(_chatText);
+                            }
                             CloseChat();
                             Event.current.Use();
                             return;
@@ -1209,7 +1326,12 @@ namespace SizeboxFix
                     if (Event.current.keyCode == KeyCode.Return || Event.current.keyCode == KeyCode.KeypadEnter)
                     {
                         if (!string.IsNullOrEmpty(_chatText))
-                            AIGiantess.Instance.SendPlayerMessage(_chatText);
+                        {
+                            if (_ttsInputMode)
+                                AIGiantess.Instance.SpeakManual(_chatText);
+                            else
+                                AIGiantess.Instance.SendPlayerMessage(_chatText);
+                        }
                         CloseChat();
                         Event.current.Use();
                         return;
