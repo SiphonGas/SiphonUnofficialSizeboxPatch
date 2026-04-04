@@ -649,7 +649,7 @@ namespace SizeboxFix
 
             // Show confirmation dialog
             var msg = UiMessageBox.Create(
-                "Are you sure you want to permanently delete this bone?\nThis cannot be undone (until you respawn the model).",
+                "Permanently delete this bone?\n(Respawn model to restore)",
                 "Delete Bone");
             msg.AddButtonsYesNo(() => { DoDeleteBones(bones); msg.Close(); });
             msg.Popup();
@@ -1265,6 +1265,17 @@ namespace SizeboxFix
             return Path.Combine(folder, "morphs.json");
         }
 
+        static void RefreshMorphsView()
+        {
+            // Toggle the MorphsView off/on to force slider refresh
+            var morphsView = Object.FindObjectOfType<MorphsView>();
+            if (morphsView != null && morphsView.gameObject.activeSelf)
+            {
+                morphsView.gameObject.SetActive(false);
+                morphsView.gameObject.SetActive(true);
+            }
+        }
+
         static void DoSave()
         {
             try
@@ -1352,6 +1363,9 @@ namespace SizeboxFix
 
                 Plugin.Log.LogInfo("[MorphPreset] Loaded " + preset.names.Length + " morphs from " + path);
                 new Toast("_morphPreset").Print("Loaded " + preset.names.Length + " morphs");
+
+                // Refresh the morph sliders UI so they reflect the new values
+                RefreshMorphsView();
             }
             catch (System.Exception ex)
             {
@@ -1380,6 +1394,7 @@ namespace SizeboxFix
                 entity.SetMorphValue(i, 0f);
 
             new Toast("_morphPreset").Print("Reset " + morphs.Count + " morphs to zero");
+            RefreshMorphsView();
         }
     }
 
@@ -1698,6 +1713,7 @@ namespace SizeboxFix
         static FieldInfo _buttonLayoutField;
         static FieldInfo _buttonPrefabField;
         static MethodInfo _addButtonMethod;
+        internal static GameObject _activeLoadPanel;
 
         static bool Prepare()
         {
@@ -1760,9 +1776,18 @@ namespace SizeboxFix
                     return;
                 }
 
+                // Close existing load panel if open
+                if (_activeLoadPanel != null)
+                {
+                    Object.Destroy(_activeLoadPanel);
+                    _activeLoadPanel = null;
+                    return;
+                }
+
                 // Create a simple load menu panel
                 var panel = new GameObject("LoadMenu");
                 panel.transform.SetParent(pauseView.transform, false);
+                _activeLoadPanel = panel;
 
                 var panelImg = panel.AddComponent<Image>();
                 panelImg.color = new Color(0.1f, 0.1f, 0.1f, 0.95f);
@@ -1891,10 +1916,24 @@ namespace SizeboxFix
             }
         }
 
+        static System.Collections.IEnumerator RebuildAfterDelay()
+        {
+            // Wait 2 frames for scene to fully initialize
+            yield return null;
+            yield return null;
+            Plugin.Log.LogInfo("[LoadButton] Rebuilding scene after map switch");
+            SavedScenesManager.Instance.ReBuildScene();
+        }
+
         static void ClearAllEntities()
         {
             try
             {
+                // Deselect current entity first — prevents stale reference bugs
+                // (invisible skeleton UI, broken handles, etc.)
+                if (InterfaceControl.instance != null)
+                    InterfaceControl.instance.SetSelectedObject(null);
+
                 // Destroy all existing entities so loading starts fresh
                 var allEntities = Object.FindObjectsOfType<EntityBase>();
                 int count = 0;
@@ -1941,22 +1980,36 @@ namespace SizeboxFix
                 string savedScene = saveData != null ? saveData.scene : null;
                 string currentScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name;
 
+                // Unpause and close the pause menu UI
                 if (GameController.Instance != null)
                     GameController.Instance.SetPausedState(false);
+                var guiMgr = SizeboxUI.GuiManager.Instance;
+                if (guiMgr != null)
+                    guiMgr.ClosePauseMenu();
 
-                // Clear ALL existing entities before loading
+                // Clear existing entities safely
                 ClearAllEntities();
 
                 if (!string.IsNullOrEmpty(savedScene) && savedScene != currentScene)
                 {
-                    // Different scene — load the scene (which also clears everything)
-                    // then ReBuildScene runs after scene load via the cached data
+                    // Different scene — load scene and rebuild after it finishes
                     Plugin.Log.LogInfo("[LoadButton] Switching scene: " + currentScene + " -> " + savedScene);
+
+                    // Register a one-shot callback to rebuild after scene loads
+                    UnityEngine.Events.UnityAction<UnityEngine.SceneManagement.Scene, UnityEngine.SceneManagement.LoadSceneMode> callback = null;
+                    callback = (scene, mode) =>
+                    {
+                        UnityEngine.SceneManagement.SceneManager.sceneLoaded -= callback;
+                        // Wait a frame for GameController to initialize
+                        GameController.Instance.StartCoroutine(RebuildAfterDelay());
+                    };
+                    UnityEngine.SceneManagement.SceneManager.sceneLoaded += callback;
+
                     SavedScenesManager.Instance.LoadScene(savedScene);
                 }
                 else
                 {
-                    // Same scene — rebuild entities (already cleared above)
+                    // Same scene — rebuild entities directly
                     SavedScenesManager.Instance.ReBuildScene();
                 }
 
@@ -1967,6 +2020,34 @@ namespace SizeboxFix
             {
                 Plugin.Log.LogError("[LoadButton] Load failed: " + ex);
                 new Toast("_loadMenu").Print("Load failed: " + ex.Message);
+            }
+        }
+    }
+
+    // Patch PauseView.CloseIfOpen so Escape closes our Load panel
+    [HarmonyPatch]
+    static class PauseMenuLoadPanelEscape
+    {
+        static System.Type _pauseViewType;
+
+        static bool Prepare()
+        {
+            _pauseViewType = AccessTools.TypeByName("SizeboxUI.PauseView");
+            return _pauseViewType != null;
+        }
+
+        static MethodBase TargetMethod()
+        {
+            return AccessTools.Method(_pauseViewType, "CloseIfOpen");
+        }
+
+        static void Postfix(ref bool __result)
+        {
+            if (PauseMenuLoadButton._activeLoadPanel != null)
+            {
+                Object.Destroy(PauseMenuLoadButton._activeLoadPanel);
+                PauseMenuLoadButton._activeLoadPanel = null;
+                __result = true; // Tell PauseView we closed something
             }
         }
     }
@@ -2122,6 +2203,42 @@ namespace SizeboxFix
             }
 
             return false; // Skip original
+        }
+    }
+
+    // === Version label on main menu ===
+    [HarmonyPatch(typeof(MenuController), "Start")]
+    static class MainMenuVersionLabel
+    {
+        static void Postfix(MenuController __instance)
+        {
+            try
+            {
+                // Add version text to bottom-right of the main menu canvas
+                var canvas = __instance.menuUI;
+                if (canvas == null) return;
+
+                var labelGo = new GameObject("SizeboxFixVersion");
+                labelGo.transform.SetParent(canvas.transform, false);
+
+                var txt = labelGo.AddComponent<Text>();
+                txt.text = "SizeboxFix v1.4.1";
+                txt.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+                txt.fontSize = 16;
+                txt.alignment = TextAnchor.LowerRight;
+                txt.color = new Color(1f, 1f, 1f, 0.5f);
+
+                var rect = labelGo.GetComponent<RectTransform>();
+                rect.anchorMin = new Vector2(1f, 0f);
+                rect.anchorMax = new Vector2(1f, 0f);
+                rect.pivot = new Vector2(1f, 0f);
+                rect.anchoredPosition = new Vector2(-15f, 10f);
+                rect.sizeDelta = new Vector2(200f, 25f);
+            }
+            catch (System.Exception ex)
+            {
+                Plugin.Log.LogError("[VersionLabel] " + ex.Message);
+            }
         }
     }
 }
