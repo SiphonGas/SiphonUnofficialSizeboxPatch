@@ -84,3 +84,25 @@ Sizebox v3.01 - Win64 (Primary)/Sizebox_Data/StreamingAssets/lua/doc/
 # Personal files
 *Findings*
 *findings*
+
+# Private runtime data and publication review files
+.publish-review/
+SizeboxAI*.cfg
+SizeboxAI_conversation.json
+SizeboxAI_chatlog.txt
+SizeboxAI_Scenarios/
+*.log
+
+# Personal models, notes, and locally packaged binaries
+/*.blend
+/*.blend1
+/*.png
+/EmotionControlFishAudio.txt
+/SizeboxFix-*.zip
+/docs/*.code-workspace
+/docs/model-conversion-guide.md
+/docs/model-pipeline/
+/docs/tooling-guide.md
+/docs/multi-ai-plan.md
+/docs/lip-sync-plan.md
+/docs/city-optimization-plan.md

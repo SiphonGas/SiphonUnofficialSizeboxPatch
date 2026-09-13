@@ -11,7 +11,7 @@ using Sizebox.CharacterEditor;
 
 namespace SizeboxFix
 {
-    [BepInPlugin("com.sizeboxfix.patches", "Sizebox Fix", "1.3.0")]
+    [BepInPlugin("com.sizeboxfix.patches", "Sizebox Fix", "1.5.0")]
     public class Plugin : BaseUnityPlugin
     {
         internal static BepInEx.Logging.ManualLogSource Log;
@@ -33,7 +33,7 @@ namespace SizeboxFix
             Log = Logger;
             var harmony = new Harmony("com.sizeboxfix.patches");
             harmony.PatchAll();
-            Logger.LogInfo("SizeboxFix 1.3 loaded");
+            Logger.LogInfo("SizeboxFix " + Info.Metadata.Version + " loaded");
 
             // Add AI keybind handler (F8 to toggle)
             gameObject.AddComponent<AIKeybindHandler>();
@@ -81,9 +81,18 @@ namespace SizeboxFix
             {
                 // Moving: unfreeze rigidbody for physics
                 var rbMove = Traverse.Create(__instance).Field("rigidBody").GetValue<Rigidbody>();
-                if (rbMove != null && rbMove.constraints == RigidbodyConstraints.FreezeAll)
+                if (rbMove != null)
                 {
-                    rbMove.constraints = RigidbodyConstraints.FreezeRotation;
+                    if (rbMove.constraints == RigidbodyConstraints.FreezeAll)
+                        rbMove.constraints = RigidbodyConstraints.FreezeRotation;
+
+                    // Kill any residual velocity from collisions — prevents drift
+                    // The steering system sets velocity directly, so we don't need
+                    // leftover collision velocity hanging around
+                    if (rbMove.velocity.magnitude > gts.Height * 2f)
+                    {
+                        rbMove.velocity = Vector3.zero;
+                    }
                 }
 
                 Vector3 capsulePos = capsuleT.position;
@@ -115,17 +124,20 @@ namespace SizeboxFix
                     gts._MoveMesh(targetPos);
                 }
 
+                // Only sync rotation if capsule rotated significantly (>2 degrees)
+                // Prevents tiny physics nudges from causing visible jitter
                 float deltaTime = Time.deltaTime;
-                gts.transform.rotation = Quaternion.Slerp(
-                    gts.transform.rotation, capsuleT.rotation, 10f * deltaTime);
+                float angleDiff = Quaternion.Angle(gts.transform.rotation, capsuleT.rotation);
+                if (angleDiff > 2f)
+                    gts.transform.rotation = Quaternion.Slerp(
+                        gts.transform.rotation, capsuleT.rotation, 10f * deltaTime);
             }
             else
             {
-                // Not moving: freeze rigidbody constraints to prevent forces from moving it
+                // Not moving: freeze everything — position AND rotation
                 var rb = Traverse.Create(__instance).Field("rigidBody").GetValue<Rigidbody>();
                 if (rb != null)
                 {
-                    // Freeze all axes — still detects collisions but can't be pushed
                     if (rb.constraints != RigidbodyConstraints.FreezeAll)
                     {
                         rb.velocity = Vector3.zero;
@@ -133,7 +145,9 @@ namespace SizeboxFix
                         rb.constraints = RigidbodyConstraints.FreezeAll;
                     }
                     rb.position = gts.transform.position;
+                    rb.rotation = gts.transform.rotation;
                 }
+                capsuleT.position = gts.transform.position;
                 capsuleT.rotation = gts.transform.rotation;
             }
 
@@ -178,6 +192,29 @@ namespace SizeboxFix
                         }
                     }
                 }
+            }
+        }
+    }
+
+    // === Fix 1e: Zero rigidbody velocity when movement stops ===
+    // MovementCharacter.Stop() sets move=false but doesn't zero rigidbody velocity,
+    // causing drift after hitting colliders.
+    [HarmonyPatch(typeof(MovementCharacter), "Stop")]
+    static class MovementStopVelocityFix
+    {
+        static void Postfix(MovementCharacter __instance)
+        {
+            var entity = __instance.Entity;
+            if (entity == null || !entity.isGiantess) return;
+
+            var gts = entity as Giantess;
+            if (gts == null || gts.gtsMovement == null) return;
+
+            var rb = Traverse.Create(gts.gtsMovement).Field("rigidBody").GetValue<Rigidbody>();
+            if (rb != null)
+            {
+                rb.velocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
             }
         }
     }
@@ -476,6 +513,9 @@ namespace SizeboxFix
             CreateButton(panel.transform, "Hide Bone", OnHideBone);
             CreateButton(panel.transform, "Show Bone", OnShowBone);
             CreateButton(panel.transform, "Delete Bone Mesh", OnDeleteBone);
+            CreateLabel(panel.transform, "BONE PRESETS");
+            CreateButton(panel.transform, "Save Hidden Bones", OnSaveHiddenBones);
+            CreateButton(panel.transform, "Load Hidden Bones", OnLoadHiddenBones);
         }
 
         static void CreateLabel(Transform parent, string text)
@@ -662,7 +702,6 @@ namespace SizeboxFix
                 Transform t = bone.RealTransform;
                 if (t == null) continue;
 
-                // Destroy all renderers on this bone and children (permanent)
                 var renderers = t.GetComponentsInChildren<Renderer>(true);
                 int count = 0;
                 foreach (var r in renderers)
@@ -671,19 +710,106 @@ namespace SizeboxFix
                     count++;
                 }
 
-                // Destroy colliders too (permanent)
                 var colliders = t.GetComponentsInChildren<Collider>(true);
                 foreach (var c in colliders)
                 {
                     Object.Destroy(c);
                 }
 
-                // Scale to zero and mark as deleted so Show can't restore it
                 t.localScale = Vector3.one * 0.0001f;
                 deletedBones.Add(t);
 
                 Debug.Log("[SizeboxFix] Permanently deleted bone: " + t.name + " (" + count + " renderers destroyed)");
             }
+        }
+
+        static void OnSaveHiddenBones()
+        {
+            var entity = InterfaceControl.instance?.selectedEntity;
+            if (entity == null)
+            {
+                Debug.Log("[SizeboxFix] No entity selected");
+                return;
+            }
+
+            // Collect all hidden bone names
+            var boneNames = new System.Collections.Generic.List<string>();
+            foreach (var kvp in hiddenBones)
+            {
+                if (kvp.Key != null)
+                    boneNames.Add(kvp.Key.name);
+            }
+            foreach (var t in deletedBones)
+            {
+                if (t != null && !boneNames.Contains(t.name))
+                    boneNames.Add(t.name);
+            }
+
+            if (boneNames.Count == 0)
+            {
+                new Toast("_bones").Print("No hidden bones to save");
+                return;
+            }
+
+            // Save to character folder
+            string folder = Path.Combine(
+                Application.persistentDataPath,
+                "Character",
+                entity.asset.AssetFullName);
+            if (!Directory.Exists(folder))
+                Directory.CreateDirectory(folder);
+
+            string path = Path.Combine(folder, "hidden_bones.txt");
+            File.WriteAllLines(path, boneNames.ToArray());
+
+            Debug.Log("[SizeboxFix] Saved " + boneNames.Count + " hidden bones to " + path);
+            new Toast("_bones").Print("Saved " + boneNames.Count + " hidden bones");
+        }
+
+        static void OnLoadHiddenBones()
+        {
+            var entity = InterfaceControl.instance?.selectedEntity;
+            if (entity == null)
+            {
+                Debug.Log("[SizeboxFix] No entity selected");
+                return;
+            }
+
+            string folder = Path.Combine(
+                Application.persistentDataPath,
+                "Character",
+                entity.asset.AssetFullName);
+            string path = Path.Combine(folder, "hidden_bones.txt");
+
+            if (!File.Exists(path))
+            {
+                new Toast("_bones").Print("No hidden bones preset found");
+                return;
+            }
+
+            string[] boneNames = File.ReadAllLines(path);
+            int count = 0;
+
+            // Find all bones on the entity and hide matching ones
+            var allTransforms = entity.GetComponentsInChildren<Transform>(true);
+            foreach (var t in allTransforms)
+            {
+                foreach (string name in boneNames)
+                {
+                    if (string.IsNullOrEmpty(name)) continue;
+                    if (t.name == name.Trim())
+                    {
+                        if (!hiddenBones.ContainsKey(t))
+                            hiddenBones[t] = t.localScale;
+                        t.localScale = Vector3.one * 0.0001f;
+                        count++;
+                        break;
+                    }
+                }
+            }
+
+            Debug.Log("[SizeboxFix] Loaded " + count + " hidden bones from " + path);
+            new Toast("_bones").Print("Loaded " + count + " hidden bones");
         }
     }
 
@@ -944,16 +1070,13 @@ namespace SizeboxFix
             var entity = Traverse.Create(__instance).Field("myEntity").GetValue<EntityBase>();
             if (entity == null || !entity.isGiantess) return true; // let original run for non-giantess
 
-            // For giantesses: apply position delta only, skip rotation
             var rb = Traverse.Create(__instance).Field("_rigidbody").GetValue<Rigidbody>();
             var delta = Traverse.Create(__instance).Field("delta").GetValue<Vector3>();
 
             if (rb != null)
             {
-                // Skip root motion position when DoNotMove is active
-                var gts = entity as Giantess;
-                bool doNotMove = gts != null && gts.gtsMovement != null && gts.gtsMovement.doNotMoveGts;
-                if (!doNotMove)
+                bool isFrozen = rb.constraints == RigidbodyConstraints.FreezeAll;
+                if (!isFrozen)
                     rb.MovePosition(rb.position + delta);
             }
 
@@ -985,7 +1108,43 @@ namespace SizeboxFix
 
         static System.Exception Finalizer(System.Exception __exception)
         {
-            if (__exception != null) return null;
+            return null; // Swallow all toast errors
+        }
+    }
+
+    // Catch all ToastInternal crashes — PopUp, StartCoroutine on inactive object
+    [HarmonyPatch]
+    static class ToastPopUpCrashFix
+    {
+        static System.Type _toastInternalType;
+
+        static bool Prepare()
+        {
+            _toastInternalType = AccessTools.TypeByName("ToastInternal");
+            return _toastInternalType != null;
+        }
+
+        static IEnumerable<MethodBase> TargetMethods()
+        {
+            yield return AccessTools.Method(_toastInternalType, "PopUp", new[] { typeof(Toast.Timeout) });
+            yield return AccessTools.Method(_toastInternalType, "PopUp", new[] { typeof(string), typeof(Toast.Timeout) });
+        }
+
+        static bool Prefix(MonoBehaviour __instance)
+        {
+            // Skip if game object is inactive — can't start coroutines
+            // Also destroy the stray toast object so it doesn't appear in menus
+            if (__instance == null || !__instance.gameObject.activeInHierarchy)
+            {
+                if (__instance != null)
+                    Object.Destroy(__instance.gameObject);
+                return false;
+            }
+            return true;
+        }
+
+        static System.Exception Finalizer(System.Exception __exception)
+        {
             return null;
         }
     }
@@ -1804,6 +1963,29 @@ namespace SizeboxFix
                     layoutRect.sizeDelta = new Vector2(size.x, size.y + cellH);
                 }
 
+                // Add AI Settings button after Load
+                var aiBtn = (Button)_addButtonMethod.Invoke(__instance, new object[] { "AI Settings" });
+                aiBtn.transform.SetSiblingIndex(4);
+                aiBtn.onClick.AddListener(() =>
+                {
+                    // Close pause menu and open settings panel
+                    if (GameController.Instance != null)
+                        GameController.Instance.SetPausedState(false);
+                    var guiMgr = SizeboxUI.GuiManager.Instance;
+                    if (guiMgr != null)
+                        guiMgr.ClosePauseMenu();
+                    AISettingsPanel.Show();
+                });
+
+                // Expand grid for both extra buttons
+                var layoutRect2 = layout.GetComponent<RectTransform>();
+                if (layoutRect2 != null)
+                {
+                    var size2 = layoutRect2.sizeDelta;
+                    var cellH2 = layout.cellSize.y + layout.spacing.y;
+                    layoutRect2.sizeDelta = new Vector2(size2.x, size2.y + cellH2);
+                }
+
                 Plugin.Log.LogInfo("[LoadButton] Load button added to pause menu");
             }
             catch (System.Exception ex)
@@ -2265,7 +2447,7 @@ namespace SizeboxFix
                 labelGo.transform.SetParent(canvas.transform, false);
 
                 var txt = labelGo.AddComponent<Text>();
-                txt.text = "SizeboxFix v1.4.3";
+                txt.text = "SizeboxFix v1.5.0";
                 txt.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
                 txt.fontSize = 16;
                 txt.alignment = TextAnchor.LowerRight;
@@ -2457,6 +2639,444 @@ namespace SizeboxFix
         {
             // Just let it run — we'll handle cleanup differently
             return instructions;
+        }
+    }
+
+    // === AI Settings Panel ===
+    // Opens from pause menu "AI Settings" button
+    public class AISettingsPanel : MonoBehaviour
+    {
+        static AISettingsPanel _instance;
+        bool _visible;
+        Vector2 _scrollPos;
+        Rect _windowRect = new Rect(100, 50, 550, 700);
+        int _selectedTab; // 0 = Shared, -1 = Scenarios, 1+ = agent configs
+        string _newScenarioName = "";
+
+        bool _inputDisabled;
+
+        void Update()
+        {
+            if (_visible && !_inputDisabled)
+            {
+                if (InputManager.inputs != null)
+                    InputManager.inputs.Disable();
+                _inputDisabled = true;
+            }
+            else if (!_visible && _inputDisabled)
+            {
+                if (InputManager.inputs != null)
+                    InputManager.inputs.Enable();
+                _inputDisabled = false;
+            }
+        }
+
+        public static void Show()
+        {
+            if (_instance == null)
+            {
+                var go = new GameObject("AISettingsPanel");
+                Object.DontDestroyOnLoad(go);
+                _instance = go.AddComponent<AISettingsPanel>();
+            }
+            _instance._visible = true;
+        }
+
+        void OnGUI()
+        {
+            if (!_visible) return;
+            _windowRect = GUI.Window(98765, _windowRect, DrawWindow, "AI Giantess Settings");
+        }
+
+        void DrawWindow(int id)
+        {
+            var mgr = AIGiantess.Instance;
+            if (mgr == null || mgr._sharedConfig == null)
+            {
+                GUILayout.Label("AI Manager not loaded");
+                if (GUILayout.Button("Close")) _visible = false;
+                GUI.DragWindow();
+                return;
+            }
+
+            var shared = mgr._sharedConfig;
+            var agents = mgr._agentConfigs;
+
+            // Tab buttons
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Toggle(_selectedTab == -1, "Scenarios", "Button", GUILayout.Height(30)))
+                _selectedTab = -1;
+            if (GUILayout.Toggle(_selectedTab == 0, "Shared", "Button", GUILayout.Height(30)))
+                _selectedTab = 0;
+            for (int i = 0; i < agents.Count; i++)
+            {
+                if (GUILayout.Toggle(_selectedTab == i + 1, agents[i].Name, "Button", GUILayout.Height(30)))
+                    _selectedTab = i + 1;
+            }
+            GUILayout.EndHorizontal();
+
+            GUILayout.Space(5);
+            _scrollPos = GUILayout.BeginScrollView(_scrollPos);
+
+            if (_selectedTab == -1)
+            {
+                GUILayout.Label("Custom Scenarios", BoldLabel());
+
+                // Load saved custom scenarios
+                string scenarioDir = System.IO.Path.Combine(BepInEx.Paths.ConfigPath, "SizeboxAI_Scenarios");
+                if (System.IO.Directory.Exists(scenarioDir))
+                {
+                    foreach (var file in System.IO.Directory.GetFiles(scenarioDir, "*.txt"))
+                    {
+                        string scenarioName = System.IO.Path.GetFileNameWithoutExtension(file);
+                        GUILayout.BeginHorizontal();
+                        if (GUILayout.Button(scenarioName, GUILayout.Height(25)))
+                        {
+                            LoadCustomScenario(file, agents);
+                        }
+                        if (GUILayout.Button("X", GUILayout.Width(25), GUILayout.Height(25)))
+                        {
+                            System.IO.File.Delete(file);
+                        }
+                        GUILayout.EndHorizontal();
+                    }
+                }
+
+                GUILayout.Space(10);
+                GUILayout.Label("Save Current As:", EditorLabel());
+                _newScenarioName = GUILayout.TextField(_newScenarioName ?? "", GUILayout.Height(22));
+                if (GUILayout.Button("Save Scenario", GUILayout.Height(30)) && !string.IsNullOrEmpty(_newScenarioName))
+                {
+                    SaveCustomScenario(_newScenarioName, agents);
+                    _newScenarioName = "";
+                }
+
+                GUILayout.Space(10);
+                GUILayout.Label("Click a scenario to load. X to delete.", SmallLabel());
+            }
+            else if (_selectedTab == 0)
+            {
+                // Shared settings
+                GUILayout.Label("Shared Settings", BoldLabel());
+                GUILayout.Space(5);
+
+                GUILayout.Label("AI Model:", EditorLabel());
+                shared.Model = GUILayout.TextField(shared.Model, GUILayout.Height(22));
+
+                GUILayout.Space(5);
+                GUILayout.Label("Decision Interval (seconds):", EditorLabel());
+                string intervalStr = GUILayout.TextField(shared.DecisionInterval.ToString(), GUILayout.Height(22));
+                float parsed;
+                if (float.TryParse(intervalStr, out parsed))
+                    shared.DecisionInterval = parsed;
+
+                GUILayout.Space(10);
+                GUILayout.Label("Quick Model Select:", EditorLabel());
+                GUILayout.BeginHorizontal();
+                if (GUILayout.Button("Hermes 3", GUILayout.Height(25)))
+                    shared.Model = "nousresearch/hermes-3-llama-3.1-70b";
+                if (GUILayout.Button("Grok 4.1", GUILayout.Height(25)))
+                    shared.Model = "x-ai/grok-4.1-fast";
+                if (GUILayout.Button("Grok 4", GUILayout.Height(25)))
+                    shared.Model = "x-ai/grok-4-fast";
+                GUILayout.EndHorizontal();
+                GUILayout.BeginHorizontal();
+                if (GUILayout.Button("Grok 4.20", GUILayout.Height(25)))
+                    shared.Model = "x-ai/grok-4.20";
+                if (GUILayout.Button("Magnum v4", GUILayout.Height(25)))
+                    shared.Model = "anthracite-org/magnum-v4-72b";
+                if (GUILayout.Button("Hermes 4", GUILayout.Height(25)))
+                    shared.Model = "nousresearch/hermes-4-70b";
+                GUILayout.EndHorizontal();
+                GUILayout.BeginHorizontal();
+                if (GUILayout.Button("GPT-OSS 120B", GUILayout.Height(25)))
+                    shared.Model = "openai/gpt-oss-120b";
+                if (GUILayout.Button("Dolphin 24B", GUILayout.Height(25)))
+                    shared.Model = "cognitivecomputations/dolphin-mistral-24b-venice-edition:free";
+                if (GUILayout.Button("Euryale 70B", GUILayout.Height(25)))
+                    shared.Model = "sao10k/l3.3-euryale-70b";
+                GUILayout.EndHorizontal();
+                GUILayout.BeginHorizontal();
+                if (GUILayout.Button("DeepSeek V3.2", GUILayout.Height(25)))
+                    shared.Model = "deepseek/deepseek-v3.2";
+                if (GUILayout.Button("Mistral Large", GUILayout.Height(25)))
+                    shared.Model = "mistralai/mistral-large-2512";
+                if (GUILayout.Button("WizardLM 8x22B", GUILayout.Height(25)))
+                    shared.Model = "microsoft/wizardlm-2-8x22b";
+                GUILayout.EndHorizontal();
+                GUILayout.BeginHorizontal();
+                if (GUILayout.Button("Llama 3.3 70B", GUILayout.Height(25)))
+                    shared.Model = "meta-llama/llama-3.3-70b-instruct";
+                GUILayout.EndHorizontal();
+
+                GUILayout.Space(10);
+                GUILayout.Label("Default TTS Provider:", EditorLabel());
+                GUILayout.BeginHorizontal();
+                // Show the first agent's TTS as default
+                if (agents.Count > 0)
+                {
+                    var def = agents[0];
+                    if (GUILayout.Toggle(def.TtsProvider == "edge", "Edge", "Button"))
+                        foreach (var a in agents) a.TtsProvider = "edge";
+                    if (GUILayout.Toggle(def.TtsProvider == "fish", "Fish", "Button"))
+                        foreach (var a in agents) a.TtsProvider = "fish";
+                    if (GUILayout.Toggle(def.TtsProvider == "elevenlabs", "ElevenLabs", "Button"))
+                        foreach (var a in agents) a.TtsProvider = "elevenlabs";
+                }
+                GUILayout.EndHorizontal();
+
+                GUILayout.Space(5);
+                if (agents.Count > 0 && agents[0].TtsProvider == "fish")
+                {
+                    GUILayout.Label("Fish API Key (shared):", EditorLabel());
+                    string fishKey = agents[0].TtsFishApiKey;
+                    fishKey = GUILayout.PasswordField(fishKey, '*', GUILayout.Height(22));
+                    foreach (var a in agents) a.TtsFishApiKey = fishKey;
+                }
+
+                GUILayout.Space(5);
+                bool ttsOn = agents.Count > 0 && agents[0].TtsEnabled;
+                bool newTts = GUILayout.Toggle(ttsOn, " TTS Enabled (all agents)");
+                if (newTts != ttsOn)
+                    foreach (var a in agents) a.TtsEnabled = newTts;
+
+                GUILayout.Space(15);
+                GUILayout.Label("Chat & Audio Settings", BoldLabel());
+
+                GUILayout.Label("Max Words per Response: " + AIGiantess.maxWords, EditorLabel());
+                AIGiantess.maxWords = (int)GUILayout.HorizontalSlider(AIGiantess.maxWords, 15, 100);
+
+                GUILayout.Label("Chat Display Time: " + AIGiantess.chatDisplayTime.ToString("F0") + "s", EditorLabel());
+                AIGiantess.chatDisplayTime = GUILayout.HorizontalSlider(AIGiantess.chatDisplayTime, 5, 60);
+
+                GUILayout.Label("Max Chat Lines: " + AIGiantess.maxChatLines, EditorLabel());
+                AIGiantess.maxChatLines = (int)GUILayout.HorizontalSlider(AIGiantess.maxChatLines, 3, 30);
+
+                GUILayout.Label("Chat Font Size: " + AIGiantess.chatFontSize, EditorLabel());
+                AIGiantess.chatFontSize = (int)GUILayout.HorizontalSlider(AIGiantess.chatFontSize, 10, 24);
+
+                GUILayout.Label("Delay Between Agents: " + AIGiantess.chatStaggerDelay.ToString("F1") + "s", EditorLabel());
+                AIGiantess.chatStaggerDelay = GUILayout.HorizontalSlider(AIGiantess.chatStaggerDelay, 0, 15);
+
+                GUILayout.Label("Same Agent Auto-Talk: " + AIGiantess.autoTalkInterval.ToString("F0") + "s", EditorLabel());
+                AIGiantess.autoTalkInterval = GUILayout.HorizontalSlider(AIGiantess.autoTalkInterval, 10, 120);
+
+                GUILayout.Label("Audio Overlap Gap: " + AIGiantess.audioOverlapGap.ToString("F1") + "s", EditorLabel());
+                AIGiantess.audioOverlapGap = GUILayout.HorizontalSlider(AIGiantess.audioOverlapGap, 0, 5);
+
+                GUILayout.Label("Conversation Memory: " + AIGiantess.conversationMemory + " entries", EditorLabel());
+                AIGiantess.conversationMemory = (int)GUILayout.HorizontalSlider(AIGiantess.conversationMemory, 10, 100);
+
+                GUILayout.Label("Animation Cooldown: " + AIGiantess.animCooldown.ToString("F0") + "s", EditorLabel());
+                AIGiantess.animCooldown = GUILayout.HorizontalSlider(AIGiantess.animCooldown, 5, 120);
+
+                AIGiantess.morphsEnabled = GUILayout.Toggle(AIGiantess.morphsEnabled, " AI Expression Morphs (smile, frown, grin, etc)");
+                AIGiantess.lipSyncEnabled = GUILayout.Toggle(AIGiantess.lipSyncEnabled, " Lip Sync (mouth movement during speech)");
+            }
+            else if (_selectedTab > 0 && _selectedTab <= agents.Count)
+            {
+                // Per-agent settings
+                var agent = agents[_selectedTab - 1];
+
+                GUILayout.Label(agent.Name + " Settings", BoldLabel());
+                GUILayout.Space(5);
+
+                GUILayout.Label("Name:", EditorLabel());
+                agent.Name = GUILayout.TextField(agent.Name, GUILayout.Height(22));
+
+                GUILayout.Space(5);
+                GUILayout.Label("Personality:", EditorLabel());
+                agent.Personality = GUILayout.TextArea(agent.Personality, GUILayout.Height(120));
+
+                GUILayout.Space(10);
+                GUILayout.Label("Voice", BoldLabel());
+
+                GUILayout.Space(5);
+                GUILayout.Label("TTS Provider:", EditorLabel());
+                GUILayout.BeginHorizontal();
+                if (GUILayout.Toggle(agent.TtsProvider == "edge", "Edge", "Button"))
+                    agent.TtsProvider = "edge";
+                if (GUILayout.Toggle(agent.TtsProvider == "fish", "Fish", "Button"))
+                    agent.TtsProvider = "fish";
+                if (GUILayout.Toggle(agent.TtsProvider == "elevenlabs", "ElevenLabs", "Button"))
+                    agent.TtsProvider = "elevenlabs";
+                GUILayout.EndHorizontal();
+
+                GUILayout.Space(5);
+                agent.TtsEnabled = GUILayout.Toggle(agent.TtsEnabled, " TTS Enabled");
+
+                GUILayout.Space(5);
+                if (agent.TtsProvider == "edge")
+                {
+                    GUILayout.Label("Edge Voice:", EditorLabel());
+                    agent.TtsEdgeVoice = GUILayout.TextField(agent.TtsEdgeVoice, GUILayout.Height(22));
+                    GUILayout.Label("(en-US-AnaNeural, en-US-AriaNeural, en-US-JennyNeural)", SmallLabel());
+                }
+                else if (agent.TtsProvider == "fish")
+                {
+                    GUILayout.Label("Fish API Key:", EditorLabel());
+                    agent.TtsFishApiKey = GUILayout.PasswordField(agent.TtsFishApiKey, '*', GUILayout.Height(22));
+                    GUILayout.Label("Fish Voice Model ID:", EditorLabel());
+                    agent.TtsFishModelId = GUILayout.TextField(agent.TtsFishModelId, GUILayout.Height(22));
+                }
+                else
+                {
+                    GUILayout.Label("ElevenLabs API Key:", EditorLabel());
+                    agent.TtsApiKey = GUILayout.PasswordField(agent.TtsApiKey, '*', GUILayout.Height(22));
+                    GUILayout.Label("ElevenLabs Voice ID:", EditorLabel());
+                    agent.TtsVoiceId = GUILayout.TextField(agent.TtsVoiceId, GUILayout.Height(22));
+                }
+
+                // Show active status
+                GUILayout.Space(10);
+                var activeAgents = mgr.GetAllAgents();
+                bool isActive = false;
+                foreach (var a in activeAgents)
+                    if (a.AgentName == agent.Name) { isActive = true; break; }
+                GUILayout.Label(isActive ? "Status: ACTIVE" : "Status: Inactive", EditorLabel());
+            }
+
+            GUILayout.EndScrollView();
+
+            GUILayout.Space(5);
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("Save All", GUILayout.Height(35)))
+            {
+                mgr.SaveConfig();
+                // Update running agents with new config
+                foreach (var a in mgr.GetAllAgents())
+                {
+                    foreach (var c in agents)
+                    {
+                        if (c.Name == a.AgentName)
+                        {
+                            a._config = c;
+                            a._shared = shared;
+                            break;
+                        }
+                    }
+                }
+                AIGiantess.AddChatLine("AI settings saved!");
+            }
+            if (GUILayout.Button("Close", GUILayout.Height(35)))
+            {
+                _visible = false;
+                if (InputManager.inputs != null)
+                    InputManager.inputs.Enable();
+            }
+            GUILayout.EndHorizontal();
+
+            GUI.DragWindow();
+        }
+
+        void SaveCustomScenario(string name, List<AgentConfig> agents)
+        {
+            try
+            {
+                string dir = System.IO.Path.Combine(BepInEx.Paths.ConfigPath, "SizeboxAI_Scenarios");
+                if (!System.IO.Directory.Exists(dir))
+                    System.IO.Directory.CreateDirectory(dir);
+
+                var sb = new System.Text.StringBuilder();
+                foreach (var a in agents)
+                {
+                    sb.AppendLine("[" + a.Name + "]");
+                    sb.AppendLine("Personality=" + a.Personality);
+                    sb.AppendLine("TTSFishModelId=" + a.TtsFishModelId);
+                    sb.AppendLine("TTSProvider=" + a.TtsProvider);
+                    sb.AppendLine();
+                }
+                System.IO.File.WriteAllText(System.IO.Path.Combine(dir, name + ".txt"), sb.ToString());
+                AIGiantess.AddChatLine("Scenario '" + name + "' saved!");
+            }
+            catch (System.Exception ex)
+            {
+                Plugin.Log.LogError("[AI] Save scenario failed: " + ex.Message);
+            }
+        }
+
+        void LoadCustomScenario(string filePath, List<AgentConfig> agents)
+        {
+            try
+            {
+                var lines = System.IO.File.ReadAllLines(filePath);
+                int agentIndex = -1;
+
+                foreach (var line in lines)
+                {
+                    var trimmed = line.Trim();
+                    if (string.IsNullOrEmpty(trimmed)) continue;
+
+                    if (trimmed.StartsWith("[") && trimmed.EndsWith("]"))
+                    {
+                        string sectionName = trimmed.Substring(1, trimmed.Length - 2);
+                        agentIndex++;
+                        // Ensure we have enough agent configs
+                        while (agents.Count <= agentIndex)
+                            agents.Add(new AgentConfig());
+                        agents[agentIndex].Name = sectionName;
+                        continue;
+                    }
+
+                    if (agentIndex < 0 || agentIndex >= agents.Count) continue;
+                    if (!trimmed.Contains("=")) continue;
+
+                    var parts = trimmed.Split(new[] { '=' }, 2);
+                    var key = parts[0].Trim();
+                    var val = parts[1].Trim();
+
+                    switch (key)
+                    {
+                        case "Personality": agents[agentIndex].Personality = val; break;
+                        case "TTSFishModelId": agents[agentIndex].TtsFishModelId = val; break;
+                        case "TTSProvider": agents[agentIndex].TtsProvider = val; break;
+                    }
+                }
+
+                string scenarioName = System.IO.Path.GetFileNameWithoutExtension(filePath);
+                AIGiantess.AddChatLine("Scenario '" + scenarioName + "' loaded! Hit Save All to apply.");
+            }
+            catch (System.Exception ex)
+            {
+                Plugin.Log.LogError("[AI] Load scenario failed: " + ex.Message);
+            }
+        }
+
+        static GUIStyle _boldLabel;
+        static GUIStyle BoldLabel()
+        {
+            if (_boldLabel == null)
+            {
+                _boldLabel = new GUIStyle(GUI.skin.label);
+                _boldLabel.fontSize = 16;
+                _boldLabel.fontStyle = FontStyle.Bold;
+                _boldLabel.normal.textColor = Color.white;
+            }
+            return _boldLabel;
+        }
+
+        static GUIStyle _editorLabel;
+        static GUIStyle EditorLabel()
+        {
+            if (_editorLabel == null)
+            {
+                _editorLabel = new GUIStyle(GUI.skin.label);
+                _editorLabel.fontSize = 13;
+                _editorLabel.normal.textColor = new Color(0.9f, 0.9f, 0.9f);
+            }
+            return _editorLabel;
+        }
+
+        static GUIStyle _smallLabel;
+        static GUIStyle SmallLabel()
+        {
+            if (_smallLabel == null)
+            {
+                _smallLabel = new GUIStyle(GUI.skin.label);
+                _smallLabel.fontSize = 11;
+                _smallLabel.normal.textColor = new Color(0.6f, 0.6f, 0.6f);
+            }
+            return _smallLabel;
         }
     }
 }
