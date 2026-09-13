@@ -4,6 +4,16 @@
     <AssemblyName>SizeboxFix</AssemblyName>
     <LangVersion>latest</LangVersion>
     <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+
+    <!-- Privacy: by default .NET embeds the absolute .pdb path in the assembly,
+         which leaks the build machine's username to anyone who opens the shipped
+         DLL. No .pdb is distributed, so the debug info has no value to users. -->
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <!-- Belt and braces: if debug info is ever re-enabled, map the build root to
+         a relative path and build deterministically so no absolute path is baked in. -->
+    <Deterministic>true</Deterministic>
+    <PathMap>$(MSBuildProjectDirectory)=.</PathMap>
   </PropertyGroup>
 
   <ItemGroup>
