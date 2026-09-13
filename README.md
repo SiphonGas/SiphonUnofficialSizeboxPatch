@@ -1,6 +1,6 @@
 # Siphon's Unofficial Sizebox Patch
 
-> *"We choose to goon to the moon!"*
+> Unofficial bug fixes and experimental features for Sizebox.
 
 A BepInEx plugin for Sizebox v3.01 that fixes critical bugs and adds new features.
 
@@ -49,22 +49,24 @@ Translates Japanese MMD morph names to English for easier use.
 - **Buttcrush** (`Interaction > Buttcrush`) - GTS walks to target, sits down, crushes, and taunts. Supports ground pound mode.
 - **Stuff in Panties** (`Interaction > Stuff In Panties`) - GTS grabs target and carries them at hip position while walking around.
 
-### AI Giantess (Experimental)
-An AI-powered giantess that acts autonomously using LLM text generation.
+### AI Characters (Experimental)
 
-- **F8** - Toggle AI on selected giantess (spawn as micro first)
-- **F9** - Open chat to talk to her
-- Uses OpenRouter API (supports any OpenAI-compatible endpoint)
-- Controls default game animations (225+), facial morphs, movement, and dialogue
-- Customizable personality via config file
-- On-screen chat log with color-coded messages
-- Optional ElevenLabs text-to-speech
+- Control multiple characters with separate names, personalities, and voices.
+- Open **AI Settings** from the pause menu to edit settings and save custom scenarios locally.
+- Select a giantess and press **F8** to choose a personality preset or deactivate her AI.
+- Press **T or F9** to open chat after activating a character.
+- Optional speech through Edge TTS, ElevenLabs, or Fish Audio, with lip sync.
+- Save conversation history locally with **F11**; clear it with **Shift+F11**.
+
+The public plugin includes no personal presets, API credentials, or custom voice IDs.
+Users supply their own provider settings. AI remains experimental; compilation does not
+establish compatibility with every Sizebox build.
 
 ## Installation
 
 ### Requirements
 - Sizebox v3.01
-- [BepInEx 5.4.x](https://github.com/BepInEx/BepInEx/releases) (Unity IL2CPP or Mono, x64)
+- [BepInEx 5.4.x](https://github.com/BepInEx/BepInEx/releases) (Unity Mono, x64)
 
 ### Steps
 
@@ -83,58 +85,59 @@ When a new version is released, just download the new `SizeboxFix.dll` and repla
 3. **Install Lua behaviors** (optional):
    - Copy the `.lua` files from `Sizebox v3.01 - Win64 (Primary)/Sizebox_Data/StreamingAssets/lua/behaviors/` to the same path in your game folder
 
-4. **Set up AI Giantess** (optional):
-   - Launch the game once — it creates `BepInEx/config/SizeboxAI.cfg`
-   - Close the game
-   - Get an API key from [OpenRouter](https://openrouter.ai/keys)
-   - Open `SizeboxAI.cfg` and paste your key on the `ApiKey=` line
-   - Edit the `Personality=` line to customize her behavior
-   - Relaunch the game
+4. **Set up AI** (optional):
+   - Launch the game once to create `BepInEx/config/SizeboxAI.cfg`, then close it.
+   - Set `ApiKey`, `ApiUrl`, and `Model` for your chosen chat provider. The default endpoint is OpenRouter; other compatible chat-completions endpoints can be configured.
+   - Enter your own `Personality`. Keep `TTSEnabled=false` until chat works.
+   - Restart the game, load a map, spawn yourself as a micro, and select a giantess.
+   - Press **F8**, choose a preset, then press **T or F9** to chat.
 
-### AI Config Example
+### AI configuration example
+
+Replace the placeholder values before use. Additional named sections create more presets;
+each inherits settings from `[Default]` when loaded. Put shared API settings in `[Default]`.
+
 ```ini
-ApiKey=your-openrouter-key-here
+[Default]
+ApiKey=YOUR_KEY_HERE
 ApiUrl=https://openrouter.ai/api/v1/chat/completions
-Model=nousresearch/hermes-3-llama-3.1-70b
-DecisionInterval=8
-Personality=You are a playful giantess who enjoys toying with tiny people.
-
-# Optional ElevenLabs TTS
-TTSApiKey=your-elevenlabs-key-here
-TTSVoiceId=eVItLK1UvXctxuaRV2Oq
-TTSEnabled=true
+Model=YOUR_MODEL_ID
+DecisionInterval=5
+Personality=
+TTSProvider=edge
+TTSEnabled=false
+TTSEdgeVoice=en-US-AriaNeural
+TTSApiKey=
+TTSVoiceId=
+TTSFishApiKey=
+TTSFishModelId=
 ```
 
-### Customizing the AI Personality
-The `Personality=` line in `SizeboxAI.cfg` is the system prompt sent to the AI. This controls how she behaves, talks, and what she's willing to do. You can write anything you want here.
+For multiple characters, add sections such as `[Character 1]` and `[Character 2]` with
+your own `Personality` and voice settings. There are no bundled character scenarios.
 
-**Example prompts:**
-```
-# Playful and teasing
-Personality=You are a playful giantess who loves teasing tiny people. You are curious and mischievous. You like to pick them up and toy with them.
+### AI controls
 
-# Dominant
-Personality=You are a dominant giantess who demands respect from tiny people. You are commanding and powerful. You enjoy showing off your size and making them feel small.
+| Control | Action |
+|---------|--------|
+| Pause menu â†’ AI Settings | Edit configuration and local scenarios |
+| F8 | Choose a preset for the selected giantess, or deactivate her AI |
+| T or F9 | Open chat while AI is active |
+| Enter | Send text from the open chat box |
+| Esc | Close chat |
+| F10 | Open manual speech input while AI is active |
+| L | Toggle animation lock for the selected AI character |
+| Backslash | Mute/unmute the selected AI character |
+| F11 | Save conversation locally |
+| Shift+F11 | Clear conversation and its local saved history |
 
-# Caring and protective
-Personality=You are a gentle giantess who protects tiny people. You are kind, nurturing, and motherly. You worry about accidentally stepping on them.
+If chat does not appear, first check that you spawned as a micro, selected a giantess,
+and activated her AI. An API response is not required to open the chat interface.
+For troubleshooting, report the exact game build, plugin version, and a redacted
+`BepInEx/LogOutput.log` captured after trying F8 and F9.
 
-# Roleplay scenario
-Personality=You are a college girl who just found a tiny person on her desk. You are shocked but fascinated. You have never seen anything like this before.
-```
-
-You can change the prompt anytime — just edit the file and restart the game. The AI will follow whatever personality you describe. Be as detailed as you want.
-
-### Changing the AI Model
-The `Model=` line controls which LLM is used. The default `nousresearch/hermes-3-llama-3.1-70b` is uncensored and works well. You can browse available models at [OpenRouter Models](https://openrouter.ai/models).
-
-### AI Controls
-| Key | Action |
-|-----|--------|
-| **F8** | Toggle AI on/off (select a giantess first) |
-| **F9** | Open chat box |
-| **Enter** | Send message |
-| **Esc** | Close chat box |
+Configuration, scenarios, conversation history, and logs can contain private information.
+They stay local and are excluded from this repository. Do not include them in shared ZIPs.
 
 ## Building from Source
 
