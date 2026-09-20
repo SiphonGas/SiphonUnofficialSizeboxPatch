@@ -83,7 +83,7 @@ Users configure their own providers and characters.
    repository's `Sizebox v3.01 - Win64 (Primary)/Sizebox_Data/StreamingAssets/lua/behaviors/`
    into the corresponding folder in your game. Follow any additional release instructions.
 4. **Check startup:** run the game and inspect `BepInEx/LogOutput.log` for
-   `Loading [Sizebox Fix ...]` and subsequent errors. Version 1.5.0 also displays its
+   `Loading [Sizebox Fix ...]` and subsequent errors. Version 1.5.0 and later display their
    version on the main menu.
 
 ### Updating
@@ -163,8 +163,14 @@ voice-provider key. Keep speech disabled until chat is working.
 | F10 | Open manual speech input while AI is active |
 | L | Toggle animation lock for the selected AI character |
 | Backslash | Mute/unmute the selected AI character |
-| F11 | Save conversation locally |
-| Shift+F11 | Clear conversation and its local saved history |
+| F7 | Save conversation locally |
+| Shift+F7 | Clear conversation and its local saved history |
+
+Every AI binding above can be changed in **Pause menu > AI Settings > Shared >
+Keybinds**, or by editing the `Key...` lines in `BepInEx/config/SizeboxAI.cfg`
+using Unity [KeyCode](https://docs.unity3d.com/ScriptReference/KeyCode.html)
+names. Saving the conversation moved from F11 to F7 in 1.5.1, because F11 is the
+default Steam and Windows screenshot key.
 
 ## Troubleshooting
 
@@ -173,6 +179,7 @@ voice-provider key. Keep speech disabled until chat is working.
 | No plugin menus or controls | Confirm the DLL location and inspect `BepInEx/LogOutput.log` for loading and startup errors. |
 | F8 does nothing | Spawn as a micro and select a giantess first. Both a player entity and selected giantess are required. |
 | F9 or T does nothing | Activate AI with F8 first. Older builds may support F9 only. |
+| F8, F9 and Enter all do nothing, or AI Settings says "AI Manager not loaded" | Fixed in 1.5.1. Earlier versions could lose the AI manager on a scene load, which disabled every AI control at once while the rest of the mod kept working. |
 | Enter does nothing | Open chat first; Enter sends text rather than opening the interface. |
 | Chat opens but no reply arrives | Check `ApiKey`, `ApiUrl`, and `Model`, then inspect the log for request errors. |
 | Chat works but speech does not | Check `TTSEnabled`, voice-provider settings, and any required dependencies. |
