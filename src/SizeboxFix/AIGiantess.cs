@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
@@ -136,7 +136,48 @@ namespace SizeboxFix
         void Awake()
         {
             Instance = this;
+            // The manager used to live on the BepInEx plugin GameObject, which does not
+            // reliably survive a scene load. When it was destroyed, Instance became
+            // Unity-fake-null and every entry point (F8/F9/Enter, the settings panel)
+            // silently did nothing while the Harmony patches kept working, because they
+            // are static. Keep it alive explicitly instead.
+            UnityEngine.Object.DontDestroyOnLoad(gameObject);
             LoadConfig();
+        }
+
+        void OnDestroy()
+        {
+            if (Instance == this)
+            {
+                Instance = null;
+                Plugin.Log.LogWarning("[AI] Manager was destroyed - AI controls will be unavailable until it is recreated.");
+            }
+        }
+
+        static bool _everCreated;
+
+        /// <summary>
+        /// Returns the live manager, recreating it if it has been destroyed.
+        /// Every entry point goes through here so a lost manager heals itself
+        /// rather than failing silently.
+        /// </summary>
+        public static AIGiantess Ensure()
+        {
+            if (Instance != null) return Instance;
+
+            var go = new GameObject("SizeboxFix_AI");
+            UnityEngine.Object.DontDestroyOnLoad(go);
+            go.AddComponent<AIKeybindHandler>();
+            var mgr = go.AddComponent<AIGiantess>();
+
+            // Only the second and later calls are recoveries. Saying "recreated" at
+            // startup would cry wolf and make this line useless as a fault signal.
+            if (_everCreated)
+                Plugin.Log.LogWarning("[AI] Manager was missing and has been recreated.");
+            else
+                Plugin.Log.LogInfo("[AI] Manager ready.");
+            _everCreated = true;
+            return mgr;
         }
 
         void LoadConfig()
@@ -455,8 +496,12 @@ namespace SizeboxFix
             // F8 toggles AI on selected giantess
             if (Input.GetKeyDown(KeyCode.F8))
             {
-                var mgr = AIGiantess.Instance;
-                if (mgr == null) return;
+                var mgr = AIGiantess.Ensure();
+                if (mgr == null)
+                {
+                    Plugin.Log.LogError("[AI] Manager unavailable - cannot toggle AI.");
+                    return;
+                }
 
                 var selected = InterfaceControl.instance?.selectedEntity;
                 if (selected == null || !selected.isGiantess)

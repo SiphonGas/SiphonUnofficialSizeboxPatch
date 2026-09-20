@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using System.IO;
 using System.Collections.Generic;
 using System.Linq;
@@ -35,9 +35,8 @@ namespace SizeboxFix
             harmony.PatchAll();
             Logger.LogInfo("SizeboxFix " + Info.Metadata.Version + " loaded");
 
-            // Add AI keybind handler (F8 to toggle)
-            gameObject.AddComponent<AIKeybindHandler>();
-            gameObject.AddComponent<AIGiantess>();
+            // The AI lives on its own DontDestroyOnLoad object (see AIGiantess.Awake).
+            AIGiantess.Ensure();
         }
     }
 
@@ -2690,7 +2689,7 @@ namespace SizeboxFix
 
         void DrawWindow(int id)
         {
-            var mgr = AIGiantess.Instance;
+            var mgr = AIGiantess.Ensure();
             if (mgr == null || mgr._sharedConfig == null)
             {
                 GUILayout.Label("AI Manager not loaded");
