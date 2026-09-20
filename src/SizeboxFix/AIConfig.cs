@@ -1,8 +1,9 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using BepInEx;
+using UnityEngine;
 
 namespace SizeboxFix
 {
@@ -15,6 +16,18 @@ namespace SizeboxFix
         public string ApiUrl = "https://openrouter.ai/api/v1/chat/completions";
         public string Model = "";
         public float DecisionInterval = 5f;
+
+        // Keybinds. These were hard-coded; F11 collided with the Steam/Windows
+        // screenshot key, which users understandably did not want to rebind after
+        // years of muscle memory. The conversation shortcuts now default to F7 and
+        // every binding can be changed in the settings panel or this file.
+        public KeyCode KeyToggleAI = KeyCode.F8;
+        public KeyCode KeyChat = KeyCode.F9;
+        public KeyCode KeyChatAlt = KeyCode.T;
+        public KeyCode KeyTTSInput = KeyCode.F10;
+        public KeyCode KeySaveConversation = KeyCode.F7; // Shift+this clears instead
+        public KeyCode KeyMute = KeyCode.Backslash;
+        public KeyCode KeyLockAnim = KeyCode.L;
     }
 
     /// <summary>
@@ -115,6 +128,13 @@ namespace SizeboxFix
                     case "DecisionInterval":
                         float.TryParse(val, out shared.DecisionInterval);
                         break;
+                    case "KeyToggleAI": shared.KeyToggleAI = ParseKey(val, shared.KeyToggleAI); break;
+                    case "KeyChat": shared.KeyChat = ParseKey(val, shared.KeyChat); break;
+                    case "KeyChatAlt": shared.KeyChatAlt = ParseKey(val, shared.KeyChatAlt); break;
+                    case "KeyTTSInput": shared.KeyTTSInput = ParseKey(val, shared.KeyTTSInput); break;
+                    case "KeySaveConversation": shared.KeySaveConversation = ParseKey(val, shared.KeySaveConversation); break;
+                    case "KeyMute": shared.KeyMute = ParseKey(val, shared.KeyMute); break;
+                    case "KeyLockAnim": shared.KeyLockAnim = ParseKey(val, shared.KeyLockAnim); break;
                 }
 
                 // Per-agent settings
@@ -136,6 +156,17 @@ namespace SizeboxFix
                 agents.Add(defaultAgent);
         }
 
+        /// <summary>
+        /// Parses a KeyCode name, keeping the current value if the text is not a
+        /// valid key so a typo in the cfg cannot leave an action unbound.
+        /// </summary>
+        static KeyCode ParseKey(string val, KeyCode fallback)
+        {
+            if (string.IsNullOrEmpty(val)) return fallback;
+            try { return (KeyCode)Enum.Parse(typeof(KeyCode), val.Trim(), true); }
+            catch { return fallback; }
+        }
+
         public static void Save(SharedConfig shared, List<AgentConfig> agents)
         {
             var sb = new StringBuilder();
@@ -149,6 +180,17 @@ namespace SizeboxFix
             sb.AppendLine("ApiUrl=" + shared.ApiUrl);
             sb.AppendLine("Model=" + shared.Model);
             sb.AppendLine("DecisionInterval=" + shared.DecisionInterval);
+            sb.AppendLine("");
+            sb.AppendLine("# Keybinds - any Unity KeyCode name (F7, Backslash, T, Insert, ...)");
+            sb.AppendLine("# Shift + KeySaveConversation clears the conversation instead of saving it.");
+            sb.AppendLine("KeyToggleAI=" + shared.KeyToggleAI);
+            sb.AppendLine("KeyChat=" + shared.KeyChat);
+            sb.AppendLine("KeyChatAlt=" + shared.KeyChatAlt);
+            sb.AppendLine("KeyTTSInput=" + shared.KeyTTSInput);
+            sb.AppendLine("KeySaveConversation=" + shared.KeySaveConversation);
+            sb.AppendLine("KeyMute=" + shared.KeyMute);
+            sb.AppendLine("KeyLockAnim=" + shared.KeyLockAnim);
+            sb.AppendLine("");
 
             // Write default agent TTS settings if there's only one agent
             if (agents.Count == 1 && agents[0].Name == "Default")

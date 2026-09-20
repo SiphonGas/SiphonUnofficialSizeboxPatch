@@ -11,7 +11,7 @@ using Sizebox.CharacterEditor;
 
 namespace SizeboxFix
 {
-    [BepInPlugin("com.sizeboxfix.patches", "Sizebox Fix", "1.5.0")]
+    [BepInPlugin("com.sizeboxfix.patches", "Sizebox Fix", "1.5.1")]
     public class Plugin : BaseUnityPlugin
     {
         internal static BepInEx.Logging.ManualLogSource Log;
@@ -2446,7 +2446,7 @@ namespace SizeboxFix
                 labelGo.transform.SetParent(canvas.transform, false);
 
                 var txt = labelGo.AddComponent<Text>();
-                txt.text = "SizeboxFix v1.5.0";
+                txt.text = "SizeboxFix v1.5.1";
                 txt.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
                 txt.fontSize = 16;
                 txt.alignment = TextAnchor.LowerRight;
@@ -2687,6 +2687,27 @@ namespace SizeboxFix
             _windowRect = GUI.Window(98765, _windowRect, DrawWindow, "AI Giantess Settings");
         }
 
+        // Field name of the binding waiting for a key press, or null.
+        static string _rebinding;
+
+        /// <summary>
+        /// One row of the keybind list. Shows the current key and, when clicked,
+        /// arms capture so the next key press replaces it.
+        /// </summary>
+        static void DrawKeybind(SharedConfig shared, string label, string fieldName)
+        {
+            var f = typeof(SharedConfig).GetField(fieldName);
+            if (f == null) return;
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label(label, EditorLabel(), GUILayout.Width(210));
+            bool armed = _rebinding == fieldName;
+            string text = armed ? "press a key..." : f.GetValue(shared).ToString();
+            if (GUILayout.Button(text, GUILayout.Height(24)))
+                _rebinding = armed ? null : fieldName;
+            GUILayout.EndHorizontal();
+        }
+
         void DrawWindow(int id)
         {
             var mgr = AIGiantess.Ensure();
@@ -2700,6 +2721,22 @@ namespace SizeboxFix
 
             var shared = mgr._sharedConfig;
             var agents = mgr._agentConfigs;
+
+            // A binding is armed: the next real key press becomes the new binding.
+            if (_rebinding != null && Event.current.type == EventType.KeyDown)
+            {
+                var ev = Event.current;
+                if (ev.keyCode != KeyCode.None)
+                {
+                    if (ev.keyCode != KeyCode.Escape)
+                    {
+                        var f = typeof(SharedConfig).GetField(_rebinding);
+                        if (f != null) f.SetValue(shared, ev.keyCode);
+                    }
+                    _rebinding = null;
+                    ev.Use();
+                }
+            }
 
             // Tab buttons
             GUILayout.BeginHorizontal();
@@ -2838,6 +2875,18 @@ namespace SizeboxFix
                 bool newTts = GUILayout.Toggle(ttsOn, " TTS Enabled (all agents)");
                 if (newTts != ttsOn)
                     foreach (var a in agents) a.TtsEnabled = newTts;
+
+                GUILayout.Space(15);
+                GUILayout.Label("Keybinds", BoldLabel());
+                GUILayout.Label("Click a binding, then press the key you want. Esc cancels.", EditorLabel());
+                DrawKeybind(shared, "Toggle AI on selected", "KeyToggleAI");
+                DrawKeybind(shared, "Open chat", "KeyChat");
+                DrawKeybind(shared, "Open chat (alternate)", "KeyChatAlt");
+                DrawKeybind(shared, "Speak as giantess (TTS)", "KeyTTSInput");
+                DrawKeybind(shared, "Save conversation", "KeySaveConversation");
+                DrawKeybind(shared, "Mute selected", "KeyMute");
+                DrawKeybind(shared, "Lock animation", "KeyLockAnim");
+                GUILayout.Label("Shift + Save conversation clears it instead.", EditorLabel());
 
                 GUILayout.Space(15);
                 GUILayout.Label("Chat & Audio Settings", BoldLabel());

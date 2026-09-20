@@ -19,6 +19,20 @@ namespace SizeboxFix
 
         // Config
         internal SharedConfig _sharedConfig;
+
+        static readonly SharedConfig _fallbackKeys = new SharedConfig();
+        /// <summary>
+        /// Current keybinds. Falls back to the defaults if the manager is not up
+        /// yet, so the handler never reads a null config.
+        /// </summary>
+        internal static SharedConfig Keys
+        {
+            get
+            {
+                var i = Instance;
+                return (i != null && i._sharedConfig != null) ? i._sharedConfig : _fallbackKeys;
+            }
+        }
         internal List<AgentConfig> _agentConfigs;
         int _nextConfigIndex;
 
@@ -494,7 +508,7 @@ namespace SizeboxFix
         void Update()
         {
             // F8 toggles AI on selected giantess
-            if (Input.GetKeyDown(KeyCode.F8))
+            if (Input.GetKeyDown(AIGiantess.Keys.KeyToggleAI))
             {
                 var mgr = AIGiantess.Ensure();
                 if (mgr == null)
@@ -533,7 +547,7 @@ namespace SizeboxFix
             }
 
             // Backslash mutes/unmutes selected giantess AI
-            if (Input.GetKeyDown(KeyCode.Backslash) && !_chatOpen && AIGiantess.Instance != null)
+            if (Input.GetKeyDown(AIGiantess.Keys.KeyMute) && !_chatOpen && AIGiantess.Instance != null)
             {
                 var selected = InterfaceControl.instance?.selectedEntity;
                 if (selected != null)
@@ -548,8 +562,9 @@ namespace SizeboxFix
                 }
             }
 
-            // Shift+F11 clears conversation history
-            if (Input.GetKeyDown(KeyCode.F11) && (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
+            // Shift + the save key clears conversation history instead
+            if (Input.GetKeyDown(AIGiantess.Keys.KeySaveConversation)
+                && (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
                 && !_chatOpen && AIGiantess.Instance != null)
             {
                 lock (AIGiantess._convLock)
@@ -570,8 +585,8 @@ namespace SizeboxFix
                 AIGiantess.AddChatLine("Conversation cleared!");
             }
 
-            // T or F9 opens chat
-            if ((Input.GetKeyDown(KeyCode.T) || Input.GetKeyDown(KeyCode.F9)) && !_chatOpen
+            // chat key (or its alternate) opens chat
+            if ((Input.GetKeyDown(AIGiantess.Keys.KeyChatAlt) || Input.GetKeyDown(AIGiantess.Keys.KeyChat)) && !_chatOpen
                 && AIGiantess.Instance != null && AIGiantess.Instance.HasActiveAgents)
             {
                 _chatOpen = true;
@@ -582,15 +597,16 @@ namespace SizeboxFix
                     InputManager.inputs.Disable();
             }
 
-            // F11 saves conversation (without Shift)
-            if (Input.GetKeyDown(KeyCode.F11) && !Input.GetKey(KeyCode.LeftShift) && !Input.GetKey(KeyCode.RightShift)
+            // save key on its own saves the conversation
+            if (Input.GetKeyDown(AIGiantess.Keys.KeySaveConversation)
+                && !Input.GetKey(KeyCode.LeftShift) && !Input.GetKey(KeyCode.RightShift)
                 && !_chatOpen && AIGiantess.Instance != null)
             {
                 AIGiantess.SaveConversation();
             }
 
             // L toggles animation lock on selected giantess's agent
-            if (Input.GetKeyDown(KeyCode.L) && !_chatOpen && AIGiantess.Instance != null)
+            if (Input.GetKeyDown(AIGiantess.Keys.KeyLockAnim) && !_chatOpen && AIGiantess.Instance != null)
             {
                 var selected = InterfaceControl.instance?.selectedEntity;
                 if (selected != null)
@@ -606,7 +622,7 @@ namespace SizeboxFix
             }
 
             // F10 toggles TTS input for selected giantess
-            if (Input.GetKeyDown(KeyCode.F10) && !_chatOpen && AIGiantess.Instance != null && AIGiantess.Instance.HasActiveAgents)
+            if (Input.GetKeyDown(AIGiantess.Keys.KeyTTSInput) && !_chatOpen && AIGiantess.Instance != null && AIGiantess.Instance.HasActiveAgents)
             {
                 _chatOpen = true;
                 _chatJustOpened = true;
